@@ -18,10 +18,10 @@ from pathlib import Path
 
 def setup():
     """Initialize the notes application."""
-    # Define the notes directory in HOME
+    # Version 1 uses ~/.notes as root and looks for optional ~/.notes/notes.
     notes_dir = Path.home() / ".notes"
 
-    # Check if notes directory exists
+    # Starter behavior: report/handle later instead of auto-creating.
     if not notes_dir.exists():
         # For CLI version, we don't automatically create it
         pass
@@ -38,11 +38,11 @@ def parse_yaml_header(file_path):
         with open(file_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
 
-        # Check if file starts with YAML front matter
+        # Frontmatter must start with --- on the first line.
         if not lines or lines[0].strip() != '---':
             return {'title': file_path.name, 'file': file_path.name}
 
-        # Find the closing ---
+        # Find matching closing marker for the metadata block.
         yaml_end = -1
         for i in range(1, len(lines)):
             if lines[i].strip() == '---':
@@ -52,7 +52,7 @@ def parse_yaml_header(file_path):
         if yaml_end == -1:
             return {'title': file_path.name, 'file': file_path.name}
 
-        # Parse YAML lines (simple parsing for basic key: value pairs)
+        # Lightweight parser: handles basic key: value pairs only.
         metadata = {'file': file_path.name}
         for line in lines[1:yaml_end]:
             line = line.strip()
@@ -70,18 +70,18 @@ def parse_yaml_header(file_path):
 
 def list_notes(notes_dir):
     """List all notes in the notes directory."""
-    # Check if notes directory exists
+    # Fail early with a setup hint when folder is missing.
     if not notes_dir.exists():
         print(f"Error: Notes directory does not exist: {notes_dir}", file=sys.stderr)
         print("Create it with: mkdir -p ~/.notes/notes", file=sys.stderr)
         print("Then copy test notes: cp test-notes/*.md ~/.notes/notes/", file=sys.stderr)
         return False
 
-    # Look for notes in the notes directory (or directly in .notes)
+    # Prefer ~/.notes/notes if present, otherwise fall back to ~/.notes.
     notes_subdir = notes_dir / "notes"
     search_dirs = [notes_subdir] if notes_subdir.exists() else [notes_dir]
 
-    # Find all note files (*.md, *.note, *.txt)
+    # Accept common text note extensions.
     note_files = []
     for search_dir in search_dirs:
         note_files.extend(search_dir.glob("*.md"))
@@ -93,7 +93,7 @@ def list_notes(notes_dir):
         print("Copy test notes with: cp test-notes/*.md ~/.notes/", file=sys.stderr)
         return True
 
-    # Parse and display notes
+    # Parse metadata and print a readable summary list.
     print(f"Notes in {notes_dir}:")
     print("=" * 60)
 
@@ -142,10 +142,10 @@ def finish(exit_code=0):
 
 def main():
     """Main entry point for the notes CLI application."""
-    # Setup
+    # Setup returns folder path used by list command.
     notes_dir = setup()
 
-    # Parse command-line arguments
+    # This version runs only in command-line argument mode.
     if len(sys.argv) < 2:
         # No command provided
         print("Error: No command provided.", file=sys.stderr)
@@ -155,7 +155,7 @@ def main():
 
     command = sys.argv[1].lower()
 
-    # Process command
+    # Command router: help and list are supported in version 1.
     if command == "help":
         show_help()
         finish(0)

@@ -14,7 +14,7 @@ def setup():
     print("Future Proof Notes Manager v0.0")
     print("=" * 40)
 
-    # Define the notes directory in HOME
+    # This starter shell checks only the top-level ~/.notes folder.
     notes_dir = Path.home() / ".notes"
 
     # Check if notes directory exists
@@ -42,14 +42,14 @@ def command_loop():
     """Main command loop for processing user input."""
     while True:
         try:
-            # Get user input
+            # Read one command at a time from the prompt.
             command = input("notes> ").strip().lower()
 
             # Handle empty input
             if not command:
                 continue
 
-            # Process commands
+            # Minimal command router for this learning stage.
             if command == "quit":
                 break
             elif command == "help":
@@ -59,11 +59,11 @@ def command_loop():
                 print("Type 'help' for available commands.")
 
         except EOFError:
-            # Handle Ctrl+D
+            # Ctrl+D closes stdin; treat it as normal exit.
             print()
             break
         except KeyboardInterrupt:
-            # Handle Ctrl+C
+            # Ctrl+C keeps the app open and reminds how to quit cleanly.
             print("\nUse 'quit' to exit.")
 
 
@@ -75,7 +75,7 @@ def finish():
 
 def main():
     """Main entry point for the notes application."""
-    # Setup
+    # Setup prints startup info and returns the notes folder path.
     notes_dir = setup()
 
     # Command loop

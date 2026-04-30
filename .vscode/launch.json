@@ -1,0 +1,13 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run Notes App",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/python/notes0.py",
+            "python": "${workspaceFolder}/venv/bin/python",
+            "console": "integratedTerminal"
+        }
+    ]
+}
