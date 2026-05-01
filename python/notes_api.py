@@ -195,9 +195,8 @@ def startup() -> None:
 @app.post("/auth/login", response_model=TokenResponse)
 def login(request: LoginRequest, user_repo: UserRepository = Depends(get_user_repo)):
     """Authenticate a user and return a JWT token."""
-    try:
-        user = user_repo.get(request.username)
-    except KeyError:
+    user = user_repo.get(request.username)
+    if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
@@ -229,7 +228,7 @@ def login(request: LoginRequest, user_repo: UserRepository = Depends(get_user_re
 
 @app.get("/health")
 @app.get("/status")
-def status() -> dict:
+def health_check() -> dict:
     """Quick check that the API is running."""
     return {"status": "running"}
 
