@@ -16,9 +16,12 @@ class TestSampleNotes(unittest.TestCase):
     def setUp(self):
         self.original_notes_dir = notes0.NOTES_DIR
         notes0.NOTES_DIR = SAMPLE_NOTES_DIR
+        self.original_note_extension = notes0.NOTE_EXTENSION
+        notes0.NOTE_EXTENSION = ".md"
 
     def tearDown(self):
         notes0.NOTES_DIR = self.original_notes_dir
+        notes0.NOTE_EXTENSION = self.original_note_extension
 
     def test_read_sample_note_1(self):
         note_id = "sample-note-1"

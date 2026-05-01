@@ -62,6 +62,7 @@ class Note:
     priority: int = 3
     content: str = ""
     extra_metadata: dict = field(default_factory=dict)
+    user: str = ""  # Username of the note owner; enforces privacy (users can only access own notes)
 
     def validate(self):
         if not self.title or not self.title.strip():
@@ -521,7 +522,14 @@ def update_note_with_editor(notes_dir, note_id_prefix, editor=None):
         if tmp_file and tmp_file.exists():
             tmp_file.unlink(missing_ok=True)
 
+
 def show_help():
+    """Print available commands and current configuration to the terminal.
+
+    Why: a user who doesn't know what commands exist should always be one
+    step away from an answer — `notes0.py help` is that step.
+    Effect: purely informational — prints and returns; no files are read or written.
+    """
     help_text = """
 Future Proof Notes Manager v0.0
 
@@ -545,7 +553,12 @@ Global flags:
 Notes directory : {notes_dir}
 Default editor  : {editor}
 Note extension  : {ext}
-Exit the application with the given status code.
+    """.format(notes_dir=NOTES_DIR, editor=DEFAULT_EDITOR, ext=NOTE_EXTENSION)
+    print(help_text.strip())
+
+
+def finish(exit_code=0):
+    """Exit the application with the given status code.
 
     Why: calling sys.exit() directly throughout main() scatters process-exit
     behaviour across many branches. One function means we can add cleanup
@@ -554,14 +567,34 @@ Exit the application with the given status code.
     Effect: exit_code 0 signals success to the shell; any non-zero value
     signals failure, which matters for shell scripts and CI pipelines that
     check the exit status of commands.
-Print the interactive-mode command menu.
+    """
+    sys.exit(exit_code)
+
+
+def menu():
+    """Print the interactive-mode command menu.
 
     Why: the interactive loop calls this once on startup so the user
     immediately sees what they can type — no guessing required.
     Effect: purely display; does not read input or change any state.
     Adding a new command to interactive_mode() should be accompanied
     by a matching line here so the menu stays accurate.
-Run the REPL-style interactive command loop.
+    """
+    print("\nWhat would you like to do?")
+    print("  help    - Show help information")
+    print("  init    - Create the notes folder")
+    print("  create  - Write a new note")
+    print("  read    - View one note by ID")
+    print("  update  - Edit one note by ID")
+    print("  delete  - Remove one note by ID")
+    print("  list    - Show all your notes")
+    print("  search  - Search notes by keyword")
+    print("  stats   - Show collection summary")
+    print("  quit    - Exit\n")
+
+
+def interactive_mode(notes_dir):
+    """Run the REPL-style interactive command loop.
 
     Why: not every user wants to type `python notes0.py <command>` each
     time. The interactive loop lets them stay inside the app and type short
@@ -569,7 +602,105 @@ Run the REPL-style interactive command loop.
     Effect: blocks until the user types 'quit' or sends EOF (Ctrl-D) or
     Ctrl-C. All commands available in CLI mode are also available here,
     and they produce identical output (same functions are called).
-Top-level entry point: route argv commands or fall into interactive mode.
+    """
+    print("Future Proof Notes Manager")
+    print("Type a command below, or 'quit' to exit.")
+    menu()
+
+    while True:
+        try:
+            command = input("notes> ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            try:
+                print()
+            except (EOFError, KeyboardInterrupt):
+                pass
+            break
+
+        if not command:
+            continue
+
+        if command == "quit":
+            print("Goodbye!")
+            break
+        elif command == "help":
+            show_help()
+        elif command == "init":
+            init_notes(notes_dir)
+        elif command == "create":
+            title = input("Title: ").strip()
+            content = input("Content: ").strip()
+            tags_raw = input("Tags (comma-separated, optional): ").strip()
+            tags = [t.strip() for t in tags_raw.split(",") if t.strip()] if tags_raw else []
+            try:
+                create_note(notes_dir, title, content, tags=tags)
+            except ValueError as err:
+                print(f"Error: {err}")
+        elif command == "read":
+            note_id_prefix = input("Note ID or prefix: ").strip()
+            if not note_id_prefix:
+                print("Error: note ID or prefix is required")
+                continue
+            try:
+                resolved_id = resolve_note_id_prefix(notes_dir, note_id_prefix)
+                print(read_note(resolved_id))
+            except (FileNotFoundError, ValueError) as err:
+                print(f"Error: {err}")
+        elif command == "update":
+            note_id_prefix = input("Note ID or prefix: ").strip()
+            if not note_id_prefix:
+                print("Error: note ID or prefix is required")
+                continue
+
+            use_editor = input("Use editor? (y/N): ").strip().lower() == "y"
+            if use_editor:
+                try:
+                    update_note_with_editor(notes_dir, note_id_prefix)
+                except (FileNotFoundError, ValueError) as err:
+                    print(f"Error: {err}")
+                continue
+
+            new_title = input("New title (leave blank to keep current): ").strip()
+            new_content = input("New content (leave blank to keep current): ").strip()
+            if not new_title and not new_content:
+                print("Error: provide a new title or new content")
+                continue
+
+            try:
+                resolved_id = resolve_note_id_prefix(notes_dir, note_id_prefix)
+                update_note(resolved_id, new_title, new_content)
+            except (FileNotFoundError, ValueError) as err:
+                print(f"Error: {err}")
+        elif command == "delete":
+            note_id = input("Note ID: ").strip()
+            if not note_id:
+                print("Error: note ID is required")
+                continue
+            confirm = input(f"Delete '{note_id}'? [y/N]: ").strip().lower()
+            if confirm != "y":
+                print("Aborted.")
+                continue
+            try:
+                delete_note(note_id)
+            except FileNotFoundError as err:
+                print(f"Error: {err}")
+        elif command == "list":
+            print_notes_list(list_notes())
+        elif command == "search":
+            query = input("Search for: ").strip()
+            matches = search_notes(query)
+            if matches:
+                print("Found:")
+                for note_id in matches:
+                    print(f"  {note_id}")
+        elif command == "stats":
+            print_stats(stats_notes())
+        else:
+            print(f"Unknown command '{command}'. Type 'help' to see options.")
+
+
+def main():
+    """Top-level entry point: route argv commands or fall into interactive mode.
 
     Why: a single entry point keeps the startup sequence in one place —
     setup the directory, read the command, dispatch to the right handler.
@@ -577,3 +708,163 @@ Top-level entry point: route argv commands or fall into interactive mode.
     command and exits with 0 (success) or 1 (error). When called with no
     arguments it opens interactive_mode(), which runs until the user quits.
     """
+    debug = "--debug" in sys.argv
+    if debug:
+        sys.argv = [arg for arg in sys.argv if arg != "--debug"]
+
+    if "--help" in sys.argv[1:] or "-h" in sys.argv[1:]:
+        show_help()
+        finish(0)
+
+    notes_dir = setup()
+
+    if len(sys.argv) < 2:
+        interactive_mode(notes_dir)
+        finish(0)
+
+    command = sys.argv[1].lower()
+
+    if command == "help":
+        show_help()
+        finish(0)
+    elif command == "init":
+        init_notes(notes_dir)
+        finish(0)
+    elif command == "create":
+        if "--editor" in sys.argv[2:]:
+            result = create_note_with_editor(notes_dir)
+            finish(0 if result else 1)
+
+        tags = []
+        args = sys.argv[2:]
+        if "--tags" in args:
+            tag_index = args.index("--tags")
+            if tag_index + 1 < len(args):
+                tags = [t.strip() for t in args[tag_index + 1].split(",") if t.strip()]
+            args = args[:tag_index] + args[tag_index + 2:]
+
+        if len(args) >= 2:
+            title = args[0]
+            content = " ".join(args[1:])
+        else:
+            title = input("Title: ").strip()
+            content = input("Content: ").strip()
+            tags_raw = input("Tags (comma-separated, optional): ").strip()
+            if tags_raw:
+                tags = [t.strip() for t in tags_raw.split(",") if t.strip()]
+        try:
+            create_note(notes_dir, title, content, tags=tags)
+            finish(0)
+        except ValueError as err:
+            print(f"Error: {err}", file=sys.stderr)
+            finish(1)
+    elif command == "read":
+        note_id_prefix = sys.argv[2].strip() if len(sys.argv) >= 3 else input("Note ID or prefix: ").strip()
+        if not note_id_prefix:
+            print("Error: note ID or prefix is required", file=sys.stderr)
+            finish(1)
+        try:
+            resolved_id = resolve_note_id_prefix(notes_dir, note_id_prefix)
+            print(read_note(resolved_id))
+            finish(0)
+        except (FileNotFoundError, ValueError) as err:
+            print(f"Error: {err}", file=sys.stderr)
+            finish(1)
+    elif command == "update":
+        note_id_prefix = sys.argv[2].strip() if len(sys.argv) >= 3 else input("Note ID or prefix: ").strip()
+        if not note_id_prefix:
+            print("Error: note ID or prefix is required", file=sys.stderr)
+            finish(1)
+
+        if "--editor" in sys.argv[2:]:
+            try:
+                result = update_note_with_editor(notes_dir, note_id_prefix)
+                finish(0 if result else 1)
+            except (FileNotFoundError, ValueError) as err:
+                print(f"Error: {err}", file=sys.stderr)
+                finish(1)
+
+        if len(sys.argv) >= 5:
+            new_title = sys.argv[3].strip()
+            new_content = " ".join(sys.argv[4:]).strip()
+        else:
+            new_title = input("New title (leave blank to keep current): ").strip()
+            new_content = input("New content (leave blank to keep current): ").strip()
+
+        if not new_title and not new_content:
+            print("Error: provide a new title or new content", file=sys.stderr)
+            finish(1)
+
+        try:
+            resolved_id = resolve_note_id_prefix(notes_dir, note_id_prefix)
+            update_note(resolved_id, new_title, new_content)
+            finish(0)
+        except (FileNotFoundError, ValueError) as err:
+            print(f"Error: {err}", file=sys.stderr)
+            finish(1)
+    elif command == "delete":
+        note_id = sys.argv[2].strip() if len(sys.argv) >= 3 else input("Note ID: ").strip()
+        if not note_id:
+            print("Error: note ID is required", file=sys.stderr)
+            finish(1)
+        if "--yes" not in sys.argv:
+            confirm = input(f"Delete '{note_id}'? [y/N]: ").strip().lower()
+            if confirm != "y":
+                print("Aborted.")
+                finish(0)
+        try:
+            delete_note(note_id)
+            finish(0)
+        except FileNotFoundError as err:
+            print(f"Error: {err}", file=sys.stderr)
+            finish(1)
+    elif command == "list":
+        print_notes_list(list_notes())
+        finish(0)
+    elif command == "stats":
+        as_json = "--json" in sys.argv[2:]
+        print_stats(stats_notes(), as_json=as_json)
+        finish(0)
+    elif command == "search":
+        args = sys.argv[2:]
+        filter_tags = []
+        remaining = []
+        i = 0
+        while i < len(args):
+            if args[i] == "--tag" and i + 1 < len(args):
+                filter_tags.append(args[i + 1])
+                i += 2
+            else:
+                remaining.append(args[i])
+                i += 1
+        query = " ".join(remaining).strip()
+
+        if not query and not filter_tags:
+            query = input("Search for: ").strip()
+
+        if not query and not filter_tags:
+            print("Error: search query or --tag filter is required", file=sys.stderr)
+            finish(1)
+
+        matches = search_notes(query, filter_tags=filter_tags)
+        if matches:
+            print("Found:")
+            for note_id in matches:
+                print(f"  {note_id}")
+            finish(0)
+
+        print("No matches.")
+        finish(0)
+    else:
+        import difflib
+        known_commands = ["init", "create", "read", "update", "delete", "list", "search", "stats", "help"]
+        suggestions = difflib.get_close_matches(command, known_commands, n=1, cutoff=0.6)
+        if suggestions:
+            print(f"Unknown command '{command}'. Did you mean '{suggestions[0]}'? Try 'notes0.py help'.")
+        else:
+            print(f"Unknown command '{command}'. Try 'notes0.py help' for options.")
+        finish(1)
+
+
+if __name__ == "__main__":
+    main()
