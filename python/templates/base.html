@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Notes{% endblock %}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f5f5f5; color: #222; line-height: 1.6; }
+    .container { max-width: 800px; margin: 0 auto; padding: 1rem 1.5rem; }
+    nav { background: #1a1a2e; color: #fff; padding: 0.75rem 1.5rem; display: flex; align-items: center; gap: 1.5rem; }
+    nav a { color: #a0c4ff; text-decoration: none; }
+    nav a:hover { text-decoration: underline; }
+    nav .spacer { flex: 1; }
+    nav span { font-size: 0.9rem; opacity: 0.8; }
+    h1 { margin: 1.25rem 0 0.75rem; font-size: 1.5rem; }
+    h2 { margin: 1rem 0 0.5rem; font-size: 1.2rem; }
+    a { color: #1565c0; }
+    .btn { display: inline-block; padding: 0.4rem 1rem; border-radius: 4px; border: none; cursor: pointer; font-size: 0.95rem; text-decoration: none; }
+    .btn-primary { background: #1565c0; color: #fff; }
+    .btn-primary:hover { background: #0d47a1; }
+    .btn-danger { background: #c62828; color: #fff; }
+    .btn-danger:hover { background: #b71c1c; }
+    .btn-secondary { background: #e0e0e0; color: #333; }
+    .btn-secondary:hover { background: #bdbdbd; }
+    .card { background: #fff; border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,.1); padding: 1rem 1.25rem; margin-bottom: 0.85rem; }
+    .card-title { font-weight: 600; font-size: 1.05rem; }
+    .card-meta { font-size: 0.82rem; color: #666; margin-top: 0.2rem; }
+    .tag { display: inline-block; background: #e3f2fd; color: #1565c0; border-radius: 3px; padding: 0.1rem 0.45rem; font-size: 0.8rem; margin-right: 0.3rem; }
+    .form-group { margin-bottom: 1rem; }
+    label { display: block; font-weight: 600; margin-bottom: 0.3rem; font-size: 0.92rem; }
+    input[type=text], input[type=password], textarea { width: 100%; padding: 0.5rem 0.65rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.95rem; font-family: inherit; }
+    input[type=text]:focus, input[type=password]:focus, textarea:focus { outline: 2px solid #1565c0; border-color: transparent; }
+    textarea { min-height: 160px; resize: vertical; }
+    .error { background: #fdecea; color: #b71c1c; border-left: 4px solid #c62828; padding: 0.6rem 1rem; border-radius: 4px; margin-bottom: 1rem; }
+    .actions { display: flex; gap: 0.6rem; margin-top: 1rem; flex-wrap: wrap; align-items: center; }
+    .preview { color: #555; font-size: 0.9rem; margin-top: 0.3rem; white-space: pre-wrap; }
+    .empty-hint { color: #888; font-style: italic; margin-top: 2rem; text-align: center; }
+  </style>
+</head>
+<body>
+
+{% if request.session.get("username") %}
+<nav>
+  <a href="/">&#128221; Notes</a>
+  <a href="/notes/new">+ New</a>
+  <a href="/search">Search</a>
+  <span class="spacer"></span>
+  <span>{{ request.session.get("username") }} ({{ request.session.get("role") }})</span>
+  <form method="post" action="/logout" style="display:inline">
+    <button type="submit" style="background:none;border:none;color:#a0c4ff;cursor:pointer;font-size:0.9rem;">Logout</button>
+  </form>
+</nav>
+{% endif %}
+
+<div class="container">
+{% block content %}{% endblock %}
+</div>
+
+</body>
+</html>

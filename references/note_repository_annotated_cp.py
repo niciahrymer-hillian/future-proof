@@ -43,7 +43,7 @@ class NoteRepository(ABC):
     """
 
     @abstractmethod
-    def add(self, title: str, content: str, tags: Optional[List[str]] = None) -> str:
+    def add(self, title: str, content: str, tags: Optional[List[str]] = None, user: str = "") -> str:
         """Create a new note and return its generated ID."""
 
     @abstractmethod
@@ -97,9 +97,11 @@ class FilesystemNoteRepository(NoteRepository):
         # Ensure the storage directory exists as soon as the repo is created.
         ensure_notes_dir(notes_dir)
 
-    def add(self, title: str, content: str, tags: Optional[List[str]] = None) -> str:
+    def add(self, title: str, content: str, tags: Optional[List[str]] = None, user: str = "") -> str:
         # create_note handles slugging, timestamping, collision avoidance, and atomic write.
-        return create_note(self._notes_dir, title, content, tags)
+        # [WHY] Pass user through so it's written to YAML frontmatter on disk;
+        # without this, ownership is lost the moment the file is created.
+        return create_note(self._notes_dir, title, content, tags, user=user)
 
     def get(self, note_id: str) -> Note:
         # Read and parse the raw file so callers get a full Note object, not just content.
@@ -152,7 +154,7 @@ class MemoryNoteRepository(NoteRepository):
             suffix += 1
         return note_id
 
-    def add(self, title: str, content: str, tags: Optional[List[str]] = None) -> str:
+    def add(self, title: str, content: str, tags: Optional[List[str]] = None, user: str = "") -> str:
         if not title.strip():
             raise ValueError("title cannot be empty")
         if not content.strip():
@@ -172,6 +174,10 @@ class MemoryNoteRepository(NoteRepository):
             status="draft",
             priority=3,
             content=content.strip(),
+            # [WHY] Store user directly on the Note so list_all() / get() can
+            # filter by it. Without this, UserScopedNoteRepository can't tell
+            # which notes belong to the current user.
+            user=user,
         ).validate()
 
         self._store[note.id] = note
@@ -239,6 +245,17 @@ class MemoryNoteRepository(NoteRepository):
             if q in note.title.lower() or q in note.content.lower()
         ]
 
+    def clear(self) -> None:
+        """Remove all notes from the store.
+
+        [WHY] Test classes share a module-level singleton repo instance.
+        clear() lets each test class start with a clean slate without having
+        to create a brand-new repo object (which would lose the dependency
+        override binding in the FastAPI app).
+        [EFFECT] All notes deleted; the store is empty after this call.
+        """
+        self._store.clear()
+
 
 # ---------------------------------------------------------------------------
 # User-scoped wrapper (enforces privacy)
@@ -279,15 +296,17 @@ class UserScopedNoteRepository(NoteRepository):
         if note.user != self._username:
             raise PermissionError(f"Access denied: note belongs to {note.user}, not {self._username}")
 
-    def add(self, title: str, content: str, tags: Optional[List[str]] = None) -> str:
+    def add(self, title: str, content: str, tags: Optional[List[str]] = None, user: str = "") -> str:
         if not self._username:
             raise PermissionError("No user context set for this repository")
-        # Create the note with inner repository; then retrieve and tag it with username.
-        note_id = self._inner.add(title, content, tags)
-        note = self._inner.get(note_id)
-        note.user = self._username
-        self._inner.update(note_id, new_title=note.title, new_content=note.content)
-        return note_id
+        # [WHY SIMPLIFIED] Pass user=self._username directly to the inner repo's add().
+        # The old approach (create note, retrieve it, set .user, then call update())
+        # failed for FilesystemNoteRepository because update() only persists title and
+        # content — it never writes the user field to YAML. Passing user at creation
+        # time ensures it's written to disk in the initial atomic write.
+        # [EFFECT] Always uses the bound username; the caller's user param is ignored
+        # so no one can forge ownership by passing a different username.
+        return self._inner.add(title, content, tags, user=self._username)
 
     def get(self, note_id: str) -> Optional[Note]:
         """Get a note if it exists and is owned by the current user. Returns None otherwise."""

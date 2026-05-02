@@ -34,14 +34,18 @@ def get_test_user_repo():
     return repo
 
 
+# Shared singleton: a new instance per request loses all data between requests.
+_shared_note_repo = MemoryNoteRepository()
+
+
 def get_test_note_repo():
-    """Return an in-memory note repository for testing."""
-    return MemoryNoteRepository()
+    """Return the shared in-memory note repository for testing."""
+    return _shared_note_repo
 
 
-# Override the app's dependencies with test versions
-app.dependency_overrides[get_user_repo] = get_test_user_repo
-app.dependency_overrides[get_repo] = get_test_note_repo
+# Override the app's dependencies with test versions.
+# NOTE: set in setUpClass of each test class so other test files that also
+# set overrides (e.g. test_frontend.py) cannot clobber these during the full run.
 
 
 class TestAuthFlow(unittest.TestCase):
@@ -50,7 +54,14 @@ class TestAuthFlow(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Set up test client once for all tests."""
+        app.dependency_overrides[get_user_repo] = get_test_user_repo
+        app.dependency_overrides[get_repo] = get_test_note_repo
         cls.client = TestClient(app)
+
+    @classmethod
+    def tearDownClass(cls):
+        app.dependency_overrides.pop(get_user_repo, None)
+        app.dependency_overrides.pop(get_repo, None)
 
     def test_01_login_with_valid_credentials(self):
         """POST /auth/login with correct credentials returns a token."""
@@ -83,6 +94,8 @@ class TestNotesCRUD(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Set up test client and get tokens once."""
+        app.dependency_overrides[get_user_repo] = get_test_user_repo
+        app.dependency_overrides[get_repo] = get_test_note_repo
         cls.client = TestClient(app)
         
         # Log in as alice (viewer role)
@@ -142,6 +155,11 @@ class TestNotesCRUD(unittest.TestCase):
         bob_notes = bob_list.json()
         self.assertEqual(len(bob_notes), 1)
 
+    @classmethod
+    def tearDownClass(cls):
+        app.dependency_overrides.pop(get_user_repo, None)
+        app.dependency_overrides.pop(get_repo, None)
+
 
 class TestPrivacyEnforcement(unittest.TestCase):
     """Verify users cannot access other users' notes."""
@@ -149,6 +167,11 @@ class TestPrivacyEnforcement(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Set up test client and tokens."""
+        app.dependency_overrides[get_user_repo] = get_test_user_repo
+        app.dependency_overrides[get_repo] = get_test_note_repo
+        # Reset shared repo so this class starts with a clean slate,
+        # independent of whatever TestNotesCRUD may have created.
+        _shared_note_repo.clear()
         cls.client = TestClient(app)
         
         # Create tokens for alice and bob
@@ -187,6 +210,11 @@ class TestPrivacyEnforcement(unittest.TestCase):
         else:
             # Alice was able to create, so this config is different
             pass
+
+    @classmethod
+    def tearDownClass(cls):
+        app.dependency_overrides.pop(get_user_repo, None)
+        app.dependency_overrides.pop(get_repo, None)
 
 
 if __name__ == "__main__":

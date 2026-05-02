@@ -43,7 +43,7 @@ class NoteRepository(ABC):
     """
 
     @abstractmethod
-    def add(self, title: str, content: str, tags: Optional[List[str]] = None) -> str:
+    def add(self, title: str, content: str, tags: Optional[List[str]] = None, user: str = "") -> str:
         """Create a new note and return its generated ID."""
 
     @abstractmethod
@@ -97,9 +97,9 @@ class FilesystemNoteRepository(NoteRepository):
         # Ensure the storage directory exists as soon as the repo is created.
         ensure_notes_dir(notes_dir)
 
-    def add(self, title: str, content: str, tags: Optional[List[str]] = None) -> str:
+    def add(self, title: str, content: str, tags: Optional[List[str]] = None, user: str = "") -> str:
         # create_note handles slugging, timestamping, collision avoidance, and atomic write.
-        return create_note(self._notes_dir, title, content, tags)
+        return create_note(self._notes_dir, title, content, tags, user=user)
 
     def get(self, note_id: str) -> Note:
         # Read and parse the raw file so callers get a full Note object, not just content.
@@ -152,7 +152,7 @@ class MemoryNoteRepository(NoteRepository):
             suffix += 1
         return note_id
 
-    def add(self, title: str, content: str, tags: Optional[List[str]] = None) -> str:
+    def add(self, title: str, content: str, tags: Optional[List[str]] = None, user: str = "") -> str:
         if not title.strip():
             raise ValueError("title cannot be empty")
         if not content.strip():
@@ -172,6 +172,7 @@ class MemoryNoteRepository(NoteRepository):
             status="draft",
             priority=3,
             content=content.strip(),
+            user=user,
         ).validate()
 
         self._store[note.id] = note
@@ -239,6 +240,10 @@ class MemoryNoteRepository(NoteRepository):
             if q in note.title.lower() or q in note.content.lower()
         ]
 
+    def clear(self) -> None:
+        """Remove all notes. Useful for resetting state between test classes."""
+        self._store.clear()
+
 
 # ---------------------------------------------------------------------------
 # User-scoped wrapper (enforces privacy)
@@ -279,15 +284,12 @@ class UserScopedNoteRepository(NoteRepository):
         if note.user != self._username:
             raise PermissionError(f"Access denied: note belongs to {note.user}, not {self._username}")
 
-    def add(self, title: str, content: str, tags: Optional[List[str]] = None) -> str:
+    def add(self, title: str, content: str, tags: Optional[List[str]] = None, user: str = "") -> str:
         if not self._username:
             raise PermissionError("No user context set for this repository")
-        # Create the note with inner repository; then retrieve and tag it with username.
-        note_id = self._inner.add(title, content, tags)
-        note = self._inner.get(note_id)
-        note.user = self._username
-        self._inner.update(note_id, new_title=note.title, new_content=note.content)
-        return note_id
+        # Always use the bound username regardless of what the caller passes.
+        # This prevents callers from creating notes owned by other users.
+        return self._inner.add(title, content, tags, user=self._username)
 
     def get(self, note_id: str) -> Optional[Note]:
         """Get a note if it exists and is owned by the current user. Returns None otherwise."""

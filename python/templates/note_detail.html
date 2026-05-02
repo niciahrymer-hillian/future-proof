@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}{{ note.title }}{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:.5rem;">
+  <h1>{{ note.title }}</h1>
+  {% if can_write %}
+  <a href="/notes/{{ note.id }}/edit" class="btn btn-secondary">Edit</a>
+  {% endif %}
+</div>
+<div class="card-meta" style="margin:.25rem 0 .75rem;">
+  Created {{ note.created[:10] }} &middot; Modified {{ note.modified[:10] }}
+  {% for tag in note.tags %}<span class="tag">{{ tag }}</span>{% endfor %}
+</div>
+<div class="card">
+  <pre style="white-space:pre-wrap;font-family:inherit;font-size:.95rem;">{{ note.content }}</pre>
+</div>
+
+{% if can_write %}
+<div class="actions" style="margin-top:1rem;">
+  <form method="post" action="/notes/{{ note.id }}/delete" onsubmit="return confirm('Delete this note?')">
+    <button type="submit" class="btn btn-danger">Delete note</button>
+  </form>
+  <a href="/" class="btn btn-secondary">Back to list</a>
+</div>
+{% else %}
+<div class="actions" style="margin-top:1rem;">
+  <a href="/" class="btn btn-secondary">Back to list</a>
+</div>
+{% endif %}
+{% endblock %}

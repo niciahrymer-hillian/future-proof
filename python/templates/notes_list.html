@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}My Notes{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:.5rem;">
+  <h1>My Notes</h1>
+  {% if can_write %}
+  <a href="/notes/new" class="btn btn-primary">+ New note</a>
+  {% endif %}
+</div>
+
+{% if notes %}
+{% for note in notes %}
+<div class="card">
+  <div class="card-title"><a href="/notes/{{ note.id }}">{{ note.title }}</a></div>
+  <div class="card-meta">
+    Modified {{ note.modified[:10] }}
+    {% for tag in note.tags %}<span class="tag">{{ tag }}</span>{% endfor %}
+  </div>
+  {% if note.preview %}
+  <div class="preview">{{ note.preview[:120] }}{% if note.preview|length > 120 %}…{% endif %}</div>
+  {% endif %}
+</div>
+{% endfor %}
+{% else %}
+<p class="empty-hint">No notes yet. <a href="/notes/new">Create your first note.</a></p>
+{% endif %}
+{% endblock %}

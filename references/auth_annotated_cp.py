@@ -240,6 +240,29 @@ class InMemoryUserRepository(UserRepository):
             raise ValueError(f"User not found: {username}")
         del self._users[username_lower]
 
+    def deactivate(self, username: str) -> User:
+        """[METHOD] Soft-delete: mark the user inactive without removing their record.
+
+        [WHY soft-delete vs hard-delete]
+        Hard deletion (del self._users[...]) removes all trace of the account.
+        Problems:
+            1. Notes the user created become orphaned — no way to trace ownership.
+            2. Audit history (who made what change, when) is lost.
+            3. An admin cannot see the account ever existed.
+
+        Soft deletion sets is_active=False instead. Effects:
+            - The existing authenticate() check already blocks inactive users from logging in.
+            - The record remains, so ownership traces and audit queries still work.
+            - An admin can see the account is deactivated in GET /admin/users.
+
+        [RAISES] ValueError if the user is not found.
+        """
+        user = self.get(username)
+        if user is None:
+            raise ValueError(f"User not found: {username}")
+        user.is_active = False
+        return user
+
     def update_role(self, username: str, new_role: str) -> User:
         """Update a user's role. Raises ValueError if not found."""
         user = self.get(username)

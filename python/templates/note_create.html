@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}New Note{% endblock %}
+{% block content %}
+<h1>New note</h1>
+{% if error %}
+<div class="error">{{ error }}</div>
+{% endif %}
+<div class="card">
+  <form method="post" action="/notes/new">
+    <div class="form-group">
+      <label for="title">Title</label>
+      <input type="text" id="title" name="title" value="{{ title or '' }}" autofocus required>
+    </div>
+    <div class="form-group">
+      <label for="content">Content</label>
+      <textarea id="content" name="content" required>{{ content or '' }}</textarea>
+    </div>
+    <div class="form-group">
+      <label for="tags">Tags <small style="font-weight:normal;color:#666;">(comma-separated)</small></label>
+      <input type="text" id="tags" name="tags" value="{{ tags or '' }}" placeholder="e.g. python, ideas">
+    </div>
+    <div class="actions">
+      <button type="submit" class="btn btn-primary">Save note</button>
+      <a href="/" class="btn btn-secondary">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

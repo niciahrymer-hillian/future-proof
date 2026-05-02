@@ -118,7 +118,7 @@ def parse_note(text):
     else:
         raise ValueError("Invalid YAML frontmatter at line 2: tags must be a list or string")
 
-    known_fields = {"id", "title", "author", "created", "modified", "tags", "status", "priority"}
+    known_fields = {"id", "title", "author", "created", "modified", "tags", "status", "priority", "user"}
     extra_metadata = {k: v for k, v in metadata.items() if k not in known_fields}
 
     note = Note(
@@ -132,6 +132,7 @@ def parse_note(text):
         priority=priority,
         content=body,
         extra_metadata=extra_metadata,
+        user=str(metadata.get("user") or "").strip(),
     )
     return note.validate()
 
@@ -151,6 +152,8 @@ def serialize_note(note):
     metadata["tags"] = note.tags
     metadata["status"] = note.status
     metadata["priority"] = note.priority
+    if note.user:
+        metadata["user"] = note.user
 
     for key, value in note.extra_metadata.items():
         if key not in metadata:
@@ -182,7 +185,7 @@ def _atomic_write_text(target_path, text):
             tmp_file.unlink(missing_ok=True)
 
 
-def create_note(notes_dir, title, content, tags=None):
+def create_note(notes_dir, title, content, tags=None, user=""):
     if not title.strip():
         raise ValueError("title cannot be empty")
     if not content.strip():
@@ -204,6 +207,7 @@ def create_note(notes_dir, title, content, tags=None):
         status="draft",
         priority=3,
         content=content.strip(),
+        user=user,
     ).validate()
 
     note_path = notes_dir / f"{note.id}{NOTE_EXTENSION}"

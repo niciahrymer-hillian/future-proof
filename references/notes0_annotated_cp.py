@@ -328,7 +328,7 @@ def parse_note(text):
     # Effect: round-tripping a note through parse → serialize won't silently
     # drop user-defined metadata that isn't part of our schema.
     # [VARIABLE] known_fields: set — the fields our schema understands
-    known_fields = {"id", "title", "author", "created", "modified", "tags", "status", "priority"}
+    known_fields = {"id", "title", "author", "created", "modified", "tags", "status", "priority", "user"}
     # [VARIABLE] extra_metadata: dict — any YAML keys not in known_fields
     extra_metadata = {k: v for k, v in metadata.items() if k not in known_fields}
 
@@ -347,6 +347,9 @@ def parse_note(text):
         priority=priority,
         content=body,
         extra_metadata=extra_metadata,
+        # [WHY] "user" is a known field (not extra_metadata) so it goes into the
+        # typed Note.user attribute and can be used directly for ownership checks.
+        user=str(metadata.get("user") or "").strip(),
     )
     # Validate immediately so that bad files are caught at read time, not later
     # when the note is used — this stops invalid data from spreading through the app.
@@ -389,6 +392,10 @@ def serialize_note(note):
     metadata["tags"] = note.tags
     metadata["status"] = note.status
     metadata["priority"] = note.priority
+    # [WHY] Only write user if set — notes without an owner stay lean.
+    # Effect: anonymous or CLI-created notes don't get a blank "user: " key.
+    if note.user:
+        metadata["user"] = note.user
 
     # Re-attach any extra fields the user added so they aren't lost on save.
     for key, value in note.extra_metadata.items():
@@ -459,8 +466,9 @@ def _atomic_write_text(target_path, text):
 # [PARAMETER] title: str — human-readable note title (required, non-blank)
 # [PARAMETER] content: str — body text (required, non-blank)
 # [PARAMETER] tags: list[str] | None — optional labels; None treated as []
+# [PARAMETER] user: str — username of the note owner (empty string = no owner)
 # [RETURN]    str — the new note's ID (also its filename stem)
-def create_note(notes_dir, title, content, tags=None):
+def create_note(notes_dir, title, content, tags=None, user=""):
     """Create a note with YAML frontmatter and body content.
 
     C6: tags is now an optional list of strings (e.g. ["python", "ideas"]).
@@ -498,6 +506,9 @@ def create_note(notes_dir, title, content, tags=None):
         status="draft",
         priority=3,
         content=content.strip(),
+        # [WHY] Storing user here ensures the owner is written into the YAML
+        # frontmatter by serialize_note, making ownership durable across reads.
+        user=user,
     ).validate()  # .validate() is called on the newly created Note instance (method chaining)
 
     # File name and frontmatter share the same ID.

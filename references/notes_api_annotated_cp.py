@@ -16,10 +16,17 @@ AUTH FLOW:
   6. If invalid, dependency raises 401 Unauthorized without calling the endpoint
 """
 
+import os
 from typing import List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Query, status, Header
+# [IMPORT] FastAPI core: Form/Request for HTML routes; HTMLResponse/RedirectResponse for frontend
+from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request, status, Header
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
+# [IMPORT] SessionMiddleware: stores a signed session cookie on the browser
+#   WHY: JWT works for API clients; browsers need cookies that are sent automatically
+from starlette.middleware.sessions import SessionMiddleware
 
 from auth import (
     InMemoryUserRepository,
@@ -36,6 +43,23 @@ from note_repository import FilesystemNoteRepository, NoteRepository, UserScoped
 from notes0 import init_notes
 
 app = FastAPI(title="Future Proof Notes API", version="0.1.0")
+
+# [MIDDLEWARE] SessionMiddleware — cookie-based auth for browser users.
+# WHY: JWT tokens require callers to manage Authorization headers manually.
+#   Browsers send cookies automatically on every request, making this ergonomic
+#   for HTML pages without any JavaScript involvement.
+# SECURITY: SESSION_SECRET must be a strong random value from an env var in production.
+#   The default here is only for local development.
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.environ.get("SESSION_SECRET", "dev-secret-change-in-production"),
+)
+
+# [SETUP] Jinja2 template directory — resolved relative to THIS file.
+# WHY os.path.dirname(__file__): ensures the path works no matter which directory
+# uvicorn/pytest is launched from. Without it, the path is relative to CWD.
+_TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
+templates = Jinja2Templates(directory=_TEMPLATE_DIR)
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +187,9 @@ class NewNote(BaseModel):
 
     title: str = Field(min_length=1)
     content: str = Field(min_length=1)
+    # [FIELD] tags: Optional[List[str]] — caller may supply labels at creation time;
+    # None means no tags, which is the common case.
+    tags: Optional[List[str]] = None
 
 
 class NoteChanges(BaseModel):
@@ -170,6 +197,33 @@ class NoteChanges(BaseModel):
 
     title: Optional[str] = None
     content: Optional[str] = None
+
+
+class NewUserRequest(BaseModel):
+    """[MODEL] Payload to create a user through the ADMIN API."""
+
+    # [VALIDATION] username cannot be blank.
+    username: str = Field(min_length=1)
+    # [SECURITY] minimum password length reduces trivial weak-password mistakes.
+    password: str = Field(min_length=8)
+    # [DEFAULT] if omitted, create a read-only VIEWER account.
+    role: str = Role.VIEWER
+
+
+class UpdateRoleRequest(BaseModel):
+    """[MODEL] Payload for role changes."""
+
+    role: str
+
+
+class AdminUserResponse(BaseModel):
+    """[MODEL] User shape returned by admin endpoints."""
+
+    username: str
+    role: str
+    created: str
+    # [FIELD] is_active exposes soft-delete state to admin dashboards.
+    is_active: bool
 
 
 # ---------------------------------------------------------------------------
@@ -195,9 +249,8 @@ def startup() -> None:
 @app.post("/auth/login", response_model=TokenResponse)
 def login(request: LoginRequest, user_repo: UserRepository = Depends(get_user_repo)):
     """Authenticate a user and return a JWT token."""
-    try:
-        user = user_repo.get(request.username)
-    except KeyError:
+    user = user_repo.get(request.username)
+    if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
@@ -251,8 +304,11 @@ def create_new_note(
     repo: UserScopedNoteRepository = Depends(get_user_scoped_repo),
 ) -> dict:
     """Create one note for the authenticated user."""
-    note_id = repo.add(note_data.title, note_data.content)
-    return {"id": note_id}
+    note_id = repo.add(note_data.title, note_data.content, tags=note_data.tags)
+    # [WHY TITLE IN RESPONSE] The caller already knows the ID it just created,
+    # but echoing title back confirms the note was stored with the right value
+    # and saves a round-trip GET just to verify the creation.
+    return {"id": note_id, "title": note_data.title}
 
 
 @app.get("/api/notes/{note_id}")
@@ -308,9 +364,444 @@ def delete_one_note(
 @app.get("/api/search")
 def search_all_notes(
     text: str = Query(default=""),
-    current_user: TokenData = Depends(require_role(Role.EDITOR)),
+    # [PARAMETER] tag: list so the caller can pass multiple: ?tag=python&tag=ideas
+    tag: List[str] = Query(default=[]),
+    # [PARAMETER] after/before: ISO 8601 date prefix strings for date-range filtering
+    after: Optional[str] = Query(default=None),
+    before: Optional[str] = Query(default=None),
+    # [WHY VIEWER] searching is read-only — EDITOR was too strict and blocked
+    # legitimate read-only users (dashboards, reporting tools).
+    current_user: TokenData = Depends(require_role(Role.VIEWER)),
     repo: UserScopedNoteRepository = Depends(get_user_scoped_repo),
 ) -> dict:
-    """Search all notes for the authenticated user."""
-    matches = repo.search(text)
-    return {"query": text, "matches": matches}
+    """Search and filter notes for the authenticated user.
+
+    Filters (all optional, all combined with AND logic):
+      text  — keyword present in title or content (case-insensitive)
+      tag   — one or more tags; note must have ALL listed tags
+      after — ISO date string; only notes modified on or after this date
+      before — ISO date string; only notes modified on or before this date
+    """
+    summaries = repo.list_all()
+
+    # [FILTER] Text: check title and content preview (case-insensitive).
+    # WHY preview only: fetching full note bodies for every result would be
+    # expensive for large collections. Title + preview covers common patterns.
+    if text:
+        q = text.lower()
+        summaries = [
+            s for s in summaries
+            if q in s["title"].lower() or q in s.get("preview", "").lower()
+        ]
+
+    # [FILTER] Tags: AND intersection — note must have every requested tag.
+    # WHY AND not OR: ?tag=python&tag=ideas means "Python ideas", not "all Python plus all ideas".
+    if tag:
+        tags_lower = [t.lower() for t in tag]
+        summaries = [
+            s for s in summaries
+            if all(t in [nt.lower() for nt in s.get("tags", [])] for t in tags_lower)
+        ]
+
+    # [FILTER] Date range: ISO 8601 strings sort lexicographically in date order,
+    # so string comparison gives correct results without parsing datetime objects.
+    if after:
+        summaries = [s for s in summaries if (s.get("modified") or "") >= after]
+    if before:
+        summaries = [s for s in summaries if (s.get("modified") or "") <= before]
+
+    # [RETURN] Rich envelope: includes filter echo, count, and full summary dicts
+    # (not just IDs) so the caller doesn't need follow-up GET requests.
+    return {
+        "query": text,
+        "filters": {"tags": tag, "after": after, "before": before},
+        "count": len(summaries),
+        "matches": summaries,
+    }
+
+
+# ===========================================================================
+# [SECTION] Admin routes (user management)
+# ===========================================================================
+# [WHY] Admin endpoints centralize user lifecycle management (list/create/
+# role-change/deactivate) behind explicit Role.ADMIN checks.
+
+@app.get("/admin/users")
+def admin_list_users(
+    current_user: TokenData = Depends(require_role(Role.ADMIN)),
+    user_repo: UserRepository = Depends(get_user_repo),
+) -> List[AdminUserResponse]:
+    """[ROUTE] Return all user accounts."""
+    users = user_repo.list_all()
+    return [
+        AdminUserResponse(
+            username=u.username,
+            role=u.role,
+            created=u.created,
+            is_active=u.is_active,
+        )
+        for u in users
+    ]
+
+
+@app.post("/admin/users", status_code=201)
+def admin_create_user(
+    data: NewUserRequest,
+    current_user: TokenData = Depends(require_role(Role.ADMIN)),
+    user_repo: UserRepository = Depends(get_user_repo),
+) -> AdminUserResponse:
+    """[ROUTE] Create a new user account.
+
+    [RETURN CODES]
+    - 201: created
+    - 409: username already exists
+    - 400: unknown role value
+    """
+    if data.role not in Role.HIERARCHY:
+        raise HTTPException(status_code=400, detail=f"Unknown role: {data.role}")
+    try:
+        user = user_repo.create(data.username, data.password, role=data.role)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return AdminUserResponse(
+        username=user.username,
+        role=user.role,
+        created=user.created,
+        is_active=user.is_active,
+    )
+
+
+@app.get("/admin/users/{username}")
+def admin_get_user(
+    username: str,
+    current_user: TokenData = Depends(require_role(Role.ADMIN)),
+    user_repo: UserRepository = Depends(get_user_repo),
+) -> AdminUserResponse:
+    """[ROUTE] Return one user by username."""
+    user = user_repo.get(username)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return AdminUserResponse(
+        username=user.username,
+        role=user.role,
+        created=user.created,
+        is_active=user.is_active,
+    )
+
+
+@app.put("/admin/users/{username}/role")
+def admin_update_role(
+    username: str,
+    data: UpdateRoleRequest,
+    current_user: TokenData = Depends(require_role(Role.ADMIN)),
+    user_repo: UserRepository = Depends(get_user_repo),
+) -> AdminUserResponse:
+    """[ROUTE] Change one user's role."""
+    if data.role not in Role.HIERARCHY:
+        raise HTTPException(status_code=400, detail=f"Unknown role: {data.role}")
+    try:
+        user = user_repo.update_role(username, data.role)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail="User not found") from exc
+    return AdminUserResponse(
+        username=user.username,
+        role=user.role,
+        created=user.created,
+        is_active=user.is_active,
+    )
+
+
+@app.delete("/admin/users/{username}")
+def admin_deactivate_user(
+    username: str,
+    current_user: TokenData = Depends(require_role(Role.ADMIN)),
+    user_repo: UserRepository = Depends(get_user_repo),
+) -> AdminUserResponse:
+    """[ROUTE] Soft-deactivate a user account.
+
+    [WHY soft-delete]
+    Keep the record for history/audit while immediately blocking login by setting
+    is_active=False.
+    """
+    user = user_repo.get(username)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    try:
+        updated = user_repo.deactivate(username)
+    except AttributeError:
+        # [FALLBACK] For repositories that only support hard-delete.
+        user_repo.delete(username)
+        user.is_active = False
+        updated = user
+    return AdminUserResponse(
+        username=updated.username,
+        role=updated.role,
+        created=updated.created,
+        is_active=updated.is_active,
+    )
+
+
+# ===========================================================================
+# [SECTION] Frontend (server-rendered HTML)
+# ===========================================================================
+# These routes serve browser users. Auth is session-cookie based (POST /login
+# sets the cookie; every subsequent page request sends it automatically).
+# The JWT API routes above are unchanged — API clients are not affected.
+
+
+def _session_user(request: Request) -> Optional[str]:
+    """[HELPER] Return the username from the session cookie, or None."""
+    return request.session.get("username")
+
+
+def _session_role(request: Request) -> Optional[str]:
+    """[HELPER] Return the role from the session cookie, or None."""
+    return request.session.get("role")
+
+
+def _can_write(role: Optional[str]) -> bool:
+    """[HELPER] True when the role allows creating/editing/deleting notes."""
+    return role in (Role.EDITOR, Role.ADMIN)
+
+
+def _get_scoped_repo(
+    request: Request,
+    # [WHY Depends(get_repo) NOT get_repo()] Calling get_repo() directly bypasses
+    # FastAPI's dependency override system — test injections would be silently ignored.
+    # Declaring it as Depends() ensures the override is applied.
+    inner: NoteRepository = Depends(get_repo),
+) -> Optional[UserScopedNoteRepository]:
+    """[HELPER] Build a UserScopedNoteRepository from the session, or return None."""
+    username = _session_user(request)
+    if not username:
+        return None
+    scoped = UserScopedNoteRepository(inner)
+    scoped.set_user(username)
+    return scoped
+
+
+# ---------------------------------------------------------------------------
+# [ROUTES] Login / Logout
+# ---------------------------------------------------------------------------
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request):
+    """Render the login form."""
+    return templates.TemplateResponse(request, "login.html")
+
+
+@app.post("/login")
+def login_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    user_repo: "UserRepository" = Depends(get_user_repo),
+):
+    """Validate credentials and set session cookie.
+
+    [WHY 303 redirect] POST-redirect-GET pattern prevents form re-submission
+    on browser refresh. 303 (See Other) explicitly requests a GET.
+    [SECURITY] Error message is the same for bad username and bad password to
+    prevent user enumeration attacks.
+    """
+    user = user_repo.get(username)
+    if user is None or not user.verify_password(password) or not user.is_active:
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {"error": "Invalid username or password"},
+            status_code=401,
+        )
+    # [EFFECT] Write username and role into the signed session cookie.
+    #   On subsequent requests, _session_user() reads this back.
+    request.session["username"] = user.username
+    request.session["role"] = user.role
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/logout")
+def logout(request: Request):
+    """Clear session and redirect to login."""
+    request.session.clear()
+    return RedirectResponse("/login", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# [ROUTES] Notes list (home)
+# ---------------------------------------------------------------------------
+
+@app.get("/", response_class=HTMLResponse)
+def home(request: Request, repo: Optional[UserScopedNoteRepository] = Depends(_get_scoped_repo)):
+    """List notes for the logged-in user, or redirect to login."""
+    if not _session_user(request):
+        return RedirectResponse("/login", status_code=303)
+    notes = repo.list_all() if repo else []
+    return templates.TemplateResponse(
+        request,
+        "notes_list.html",
+        {
+            "notes": notes,
+            "can_write": _can_write(_session_role(request)),
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# [ROUTES] Create note
+# ---------------------------------------------------------------------------
+
+@app.get("/notes/new", response_class=HTMLResponse)
+def create_note_form(request: Request, repo: Optional[UserScopedNoteRepository] = Depends(_get_scoped_repo)):
+    """Render the create-note form."""
+    if not _session_user(request):
+        return RedirectResponse("/login", status_code=303)
+    if not _can_write(_session_role(request)):
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(request, "note_create.html")
+
+
+@app.post("/notes/new")
+def create_note_submit(
+    request: Request,
+    title: str = Form(...),
+    content: str = Form(...),
+    # [FIELD] tags: comma-separated string from the form; split into a list below
+    tags: str = Form(default=""),
+    repo: Optional[UserScopedNoteRepository] = Depends(_get_scoped_repo),
+):
+    """Handle create-note form submission."""
+    if not _session_user(request):
+        return RedirectResponse("/login", status_code=303)
+    # [PARSE] Split "alpha, beta" → ["alpha", "beta"], strip whitespace, skip blanks
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+    repo.add(title, content, tags=tag_list)
+    return RedirectResponse("/", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# [ROUTES] Note detail
+# ---------------------------------------------------------------------------
+
+@app.get("/notes/{note_id}", response_class=HTMLResponse)
+def note_detail(request: Request, note_id: str, repo: Optional[UserScopedNoteRepository] = Depends(_get_scoped_repo)):
+    """Show full content of a single note."""
+    if not _session_user(request):
+        return RedirectResponse("/login", status_code=303)
+    try:
+        note = repo.get(note_id)
+    except (FileNotFoundError, PermissionError):
+        raise HTTPException(status_code=404, detail="Note not found")
+    return templates.TemplateResponse(
+        request,
+        "note_detail.html",
+        {
+            "note": note,
+            "can_write": _can_write(_session_role(request)),
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# [ROUTES] Edit note
+# ---------------------------------------------------------------------------
+
+@app.get("/notes/{note_id}/edit", response_class=HTMLResponse)
+def edit_note_form(request: Request, note_id: str, repo: Optional[UserScopedNoteRepository] = Depends(_get_scoped_repo)):
+    """Render the edit form pre-filled with current note values."""
+    if not _session_user(request):
+        return RedirectResponse("/login", status_code=303)
+    if not _can_write(_session_role(request)):
+        return RedirectResponse(f"/notes/{note_id}", status_code=303)
+    try:
+        note = repo.get(note_id)
+    except (FileNotFoundError, PermissionError):
+        raise HTTPException(status_code=404, detail="Note not found")
+    return templates.TemplateResponse(request, "note_edit.html", {"note": note})
+
+
+@app.post("/notes/{note_id}/edit")
+def edit_note_submit(
+    request: Request,
+    note_id: str,
+    title: str = Form(...),
+    content: str = Form(...),
+    repo: Optional[UserScopedNoteRepository] = Depends(_get_scoped_repo),
+):
+    """Handle edit-note form submission."""
+    if not _session_user(request):
+        return RedirectResponse("/login", status_code=303)
+    try:
+        repo.update(note_id, new_title=title, new_content=content)
+    except (FileNotFoundError, PermissionError):
+        raise HTTPException(status_code=404, detail="Note not found")
+    return RedirectResponse(f"/notes/{note_id}", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# [ROUTES] Delete note
+# ---------------------------------------------------------------------------
+
+@app.post("/notes/{note_id}/delete")
+def delete_note_submit(request: Request, note_id: str, repo: Optional[UserScopedNoteRepository] = Depends(_get_scoped_repo)):
+    """Handle delete form submission.
+
+    [WHY POST] HTML forms only support GET and POST. DELETE is not a valid
+    form method. Using POST /notes/<id>/delete is the standard HTML workaround.
+    """
+    if not _session_user(request):
+        return RedirectResponse("/login", status_code=303)
+    try:
+        repo.delete(note_id)
+    except (FileNotFoundError, PermissionError):
+        pass  # [IDEMPOTENT] Already gone — just redirect to list
+    return RedirectResponse("/", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# [ROUTES] Search page
+# ---------------------------------------------------------------------------
+
+@app.get("/search", response_class=HTMLResponse)
+def search_page(
+    request: Request,
+    text: str = Query(default=""),
+    # [NOTE] The HTML search page takes tag as a single string (one text input).
+    #   The JSON API /api/search takes tag as a repeatable list parameter.
+    #   These are separate endpoints with separate UX trade-offs.
+    tag: str = Query(default=""),
+    after: str = Query(default=""),
+    before: str = Query(default=""),
+    repo: Optional[UserScopedNoteRepository] = Depends(_get_scoped_repo),
+):
+    """Render the search page; applies filters if any query params are set."""
+    if not _session_user(request):
+        return RedirectResponse("/login", status_code=303)
+    summaries = repo.list_all() if repo else []
+
+    # [FLAG] searched: True only when the user has submitted a query.
+    #   When False, the template shows all notes as a starting point.
+    searched = bool(text or tag or after or before)
+
+    if text:
+        q = text.lower()
+        summaries = [s for s in summaries if q in s["title"].lower() or q in s.get("preview", "").lower()]
+    if tag:
+        t = tag.lower()
+        summaries = [s for s in summaries if t in [nt.lower() for nt in s.get("tags", [])]]
+    if after:
+        summaries = [s for s in summaries if (s.get("modified") or "") >= after]
+    if before:
+        summaries = [s for s in summaries if (s.get("modified") or "") <= before]
+
+    return templates.TemplateResponse(
+        request,
+        "search.html",
+        {
+            "results": summaries,
+            "query": text,
+            "tag_query": tag,
+            "after": after,
+            "before": before,
+            "searched": searched,
+        },
+    )

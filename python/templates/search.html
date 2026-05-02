@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Search Notes{% endblock %}
+{% block content %}
+<h1>Search</h1>
+<div class="card">
+  <form method="get" action="/search">
+    <div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:flex-end;">
+      <div class="form-group" style="flex:1;min-width:200px;margin-bottom:0;">
+        <label for="text">Keyword</label>
+        <input type="text" id="text" name="text" value="{{ query or '' }}" placeholder="Title or content…" autofocus>
+      </div>
+      <div class="form-group" style="flex:1;min-width:150px;margin-bottom:0;">
+        <label for="tag">Tag</label>
+        <input type="text" id="tag" name="tag" value="{{ tag_query or '' }}" placeholder="e.g. python">
+      </div>
+      <div class="form-group" style="flex:1;min-width:130px;margin-bottom:0;">
+        <label for="after">After</label>
+        <input type="text" id="after" name="after" value="{{ after or '' }}" placeholder="YYYY-MM-DD">
+      </div>
+      <div class="form-group" style="flex:1;min-width:130px;margin-bottom:0;">
+        <label for="before">Before</label>
+        <input type="text" id="before" name="before" value="{{ before or '' }}" placeholder="YYYY-MM-DD">
+      </div>
+      <div style="margin-bottom:0;padding-bottom:0.05rem;">
+        <button type="submit" class="btn btn-primary">Search</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+{% if searched %}
+<p style="color:#555;margin:.75rem 0 .5rem;">{{ results|length }} result{% if results|length != 1 %}s{% endif %}</p>
+{% if results %}
+{% for note in results %}
+<div class="card">
+  <div class="card-title"><a href="/notes/{{ note.id }}">{{ note.title }}</a></div>
+  <div class="card-meta">
+    Modified {{ note.modified[:10] }}
+    {% for tag in note.tags %}<span class="tag">{{ tag }}</span>{% endfor %}
+  </div>
+  {% if note.preview %}
+  <div class="preview">{{ note.preview[:120] }}{% if note.preview|length > 120 %}…{% endif %}</div>
+  {% endif %}
+</div>
+{% endfor %}
+{% else %}
+<p class="empty-hint">No notes matched your search.</p>
+{% endif %}
+{% else %}
+{# No search yet — show all notes as a starting point #}
+{% for note in results %}
+<div class="card">
+  <div class="card-title"><a href="/notes/{{ note.id }}">{{ note.title }}</a></div>
+  <div class="card-meta">
+    Modified {{ note.modified[:10] }}
+    {% for tag in note.tags %}<span class="tag">{{ tag }}</span>{% endfor %}
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+{% endblock %}

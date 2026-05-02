@@ -240,6 +240,18 @@ class InMemoryUserRepository(UserRepository):
             raise ValueError(f"User not found: {username}")
         del self._users[username_lower]
 
+    def deactivate(self, username: str) -> "User":
+        """Soft-delete: mark user inactive without removing their record.
+
+        WHY: Preserves account history and note ownership while immediately
+        blocking login. Raises ValueError if the user is not found.
+        """
+        user = self.get(username)
+        if user is None:
+            raise ValueError(f"User not found: {username}")
+        user.is_active = False
+        return user
+
     def update_role(self, username: str, new_role: str) -> User:
         """Update a user's role. Raises ValueError if not found."""
         user = self.get(username)
