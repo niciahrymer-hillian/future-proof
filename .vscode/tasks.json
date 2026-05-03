@@ -1,0 +1,99 @@
+{
+	// HOW TO LAUNCH (recommended):
+	// 1) Press Cmd+Shift+P and run "Tasks: Run Build Task".
+	// 2) VS Code will run the default build task below:
+	//    "Launch HTML App + Open Browser".
+	// 3) This starts the server on http://127.0.0.1:8010 and opens /login.
+	// 4) To stop it, focus the terminal and press Ctrl+C.
+	//
+	// Manual alternatives in the task picker:
+	// - "Launch HTML App": start server only.
+	// - "Open HTML App in Browser": open browser only.
+	//
+	// VS Code tasks schema version.
+	"version": "2.0.0",
+	"tasks": [
+		{
+			// Primary task: starts the FastAPI + Jinja HTML app server.
+			"label": "Launch HTML App",
+			// Human-readable description shown in the task picker.
+			"detail": "Starts the FastAPI + Jinja HTML app using python/ as the import root on port 8010.",
+			// Run in the integrated shell.
+			"type": "shell",
+			// `source` activates the venv before running python.
+			// NOTE: args are joined into one shell command in order.
+			// Command executed:
+			// source venv/bin/activate && python -m uvicorn notes_api:app --app-dir python --host 127.0.0.1 --port 8010
+			"command": "source",
+			"args": [
+				"venv/bin/activate",
+				"&&",
+				"python",
+				"-m",
+				"uvicorn",
+				"notes_api:app",
+				"--app-dir",
+				"python",
+				"--host",
+				"127.0.0.1",
+				"--port",
+				"8010"
+			],
+			// Ensure the task runs from the repository root.
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			// Keep terminal visible and reused between runs.
+			// Useful for seeing uvicorn startup logs/errors.
+			// `clear: false` preserves previous output for debugging.
+			"presentation": {
+				"reveal": "always",
+				"panel": "shared",
+				"clear": false
+			},
+			// No compiler/linter matcher because this is a runtime server task.
+			"problemMatcher": [],
+			// Treat as long-running background process (server stays alive).
+			"isBackground": true,
+			// Put this task in the Build task group.
+			"group": {
+				"kind": "build",
+				"isDefault": false
+			}
+		},
+		{
+			// Helper task: opens the running HTML app in the default browser.
+			"label": "Open HTML App in Browser",
+			"detail": "Opens http://127.0.0.1:8010/login in the default browser.",
+			"type": "shell",
+			"command": "open",
+			"args": [
+				"http://127.0.0.1:8010/login"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"presentation": {
+				"reveal": "never",
+				"panel": "shared",
+				"clear": false
+			},
+			"problemMatcher": []
+		},
+		{
+			// One-click workflow task: starts server, then opens browser.
+			"label": "Launch HTML App + Open Browser",
+			"detail": "Runs the HTML server task and then opens the login page.",
+			"dependsOrder": "sequence",
+			"dependsOn": [
+				"Launch HTML App",
+				"Open HTML App in Browser"
+			],
+			"problemMatcher": [],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		}
+	]
+}

@@ -584,9 +584,10 @@ def menu():
     Adding a new command to interactive_mode() should be accompanied
     by a matching line here so the menu stays accurate.
     """
-    print("\nWhat would you like to do?")
+    print("\nWelcome To The Handy Dandy Notebook!")
+    print("Type a command word, or 'help' to see options:")
     print("  help    - Show help information")
-    print("  init    - Create the notes folder")
+    print("  folder    - Create the notes folder")
     print("  create  - Write a new note")
     print("  read    - View one note by ID")
     print("  update  - Edit one note by ID")
@@ -594,7 +595,7 @@ def menu():
     print("  list    - Show all your notes")
     print("  search  - Search notes by keyword")
     print("  stats   - Show collection summary")
-    print("  quit    - Exit\n")
+    print("  exit    - Exit\n")
 
 
 def interactive_mode(notes_dir):
@@ -607,7 +608,7 @@ def interactive_mode(notes_dir):
     Ctrl-C. All commands available in CLI mode are also available here,
     and they produce identical output (same functions are called).
     """
-    print("Future Proof Notes Manager")
+    print("Welcome To The Handy Dandy Notebook!")
     print("Type a command below, or 'quit' to exit.")
     menu()
 
@@ -624,12 +625,12 @@ def interactive_mode(notes_dir):
         if not command:
             continue
 
-        if command == "quit":
-            print("Goodbye!")
+        if command == "exit":
+            print("Thank you for sharing your thoughts.Goodbye!")
             break
         elif command == "help":
             show_help()
-        elif command == "init":
+        elif command == "folder":
             init_notes(notes_dir)
         elif command == "create":
             title = input("Title: ").strip()
@@ -731,7 +732,7 @@ def main():
     if command == "help":
         show_help()
         finish(0)
-    elif command == "init":
+    elif command == "folder":
         init_notes(notes_dir)
         finish(0)
     elif command == "create":

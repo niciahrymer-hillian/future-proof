@@ -945,11 +945,11 @@ class TestInteractiveMode(unittest.TestCase):
 		return stream.getvalue()
 
 	def test_quit_exits_cleanly(self):
-		out = self._run(["quit"])
+		out = self._run(["exit"])
 		self.assertIn("Goodbye", out)
 
 	def test_empty_input_skipped_then_quit(self):
-		out = self._run(["", "quit"])
+		out = self._run(["", "exit"])
 		self.assertIn("Goodbye", out)
 
 	def test_eof_exits_without_error(self):
@@ -959,93 +959,93 @@ class TestInteractiveMode(unittest.TestCase):
 				notes0.interactive_mode(self.test_dir)
 
 	def test_help_command(self):
-		out = self._run(["help", "quit"])
-		self.assertIn("Future Proof Notes Manager", out)
+		out = self._run(["help", "exit"])
+		self.assertIn("Welcome To The Handy Dandy Notebook!", out)
 
 	def test_init_command_creates_directory(self):
-		self._run(["init", "quit"])
+		self._run(["folder", "exit"])
 		self.assertTrue(self.test_dir.exists())
 
 	def test_list_command_empty(self):
-		out = self._run(["list", "quit"])
+		out = self._run(["list", "exit"])
 		self.assertIn("No notes yet", out)
 
 	def test_create_command(self):
-		out = self._run(["create", "My Title", "My content", "", "quit"])
+		out = self._run(["create", "My Title", "My content", "", "exit"])
 		self.assertIn("My Title", out)
 
 	def test_create_command_with_tags(self):
-		out = self._run(["create", "Tagged Note", "Body text", "python,ideas", "quit"])
+		out = self._run(["create", "Tagged Note", "Body text", "python,ideas", "exit"])
 		self.assertIn("Tagged Note", out)
 
 	def test_create_command_empty_title_shows_error(self):
-		out = self._run(["create", "", "content", "", "quit"])
+		out = self._run(["create", "", "content", "", "exit"])
 		self.assertIn("Error", out)
 
 	def test_stats_command(self):
 		notes0.create_note(self.test_dir, "A Note", "Body")
-		out = self._run(["stats", "quit"])
+		out = self._run(["stats", "exit"])
 		self.assertIn("Total notes", out)
 
 	def test_search_command_found(self):
 		notes0.create_note(self.test_dir, "Findable", "unique_xyz_content")
-		out = self._run(["search", "unique_xyz_content", "quit"])
+		out = self._run(["search", "unique_xyz_content", "exit"])
 		self.assertIn("Found", out)
 
 	def test_search_command_no_results(self):
 		# No "Found" heading when nothing matches
-		out = self._run(["search", "zzz_no_match_zzz", "quit"])
+		out = self._run(["search", "zzz_no_match_zzz", "exit"])
 		self.assertNotIn("Found", out)
 
 	def test_read_command_success(self):
 		note_id = notes0.create_note(self.test_dir, "Read Me", "Read body")
-		out = self._run(["read", note_id, "quit"])
+		out = self._run(["read", note_id, "exit"])
 		self.assertIn("Read body", out)
 
 	def test_read_command_empty_id_shows_error(self):
-		out = self._run(["read", "", "quit"])
+		out = self._run(["read", "", "exit"])
 		self.assertIn("Error", out)
 
 	def test_read_command_not_found_shows_error(self):
-		out = self._run(["read", "nonexistent_id_xyz", "quit"])
+		out = self._run(["read", "nonexistent_id_xyz", "exit"])
 		self.assertIn("Error", out)
 
 	def test_update_command(self):
 		note_id = notes0.create_note(self.test_dir, "Old Title", "Body")
 		# inputs: command, note_id, use_editor=n, new_title, new_content, quit
-		self._run(["update", note_id, "n", "New Title", "", "quit"])
+		self._run(["update", note_id, "n", "New Title", "", "exit"])
 		self.assertEqual("New Title", notes0.list_notes()[0]["title"])
 
 	def test_update_command_empty_id_shows_error(self):
-		out = self._run(["update", "", "quit"])
+		out = self._run(["update", "", "exit"])
 		self.assertIn("Error", out)
 
 	def test_update_command_no_fields_shows_error(self):
 		note_id = notes0.create_note(self.test_dir, "Title", "Body")
-		out = self._run(["update", note_id, "n", "", "", "quit"])
+		out = self._run(["update", note_id, "n", "", "", "exit"])
 		self.assertIn("Error", out)
 
 	def test_delete_command_confirmed(self):
 		note_id = notes0.create_note(self.test_dir, "To Delete", "Body")
-		self._run(["delete", note_id, "y", "quit"])
+		self._run(["delete", note_id, "y", "exit"])
 		self.assertEqual([], notes0.list_notes())
 
 	def test_delete_command_aborted(self):
 		note_id = notes0.create_note(self.test_dir, "Keep Me", "Body")
-		out = self._run(["delete", note_id, "n", "quit"])
+		out = self._run(["delete", note_id, "n", "exit"])
 		self.assertIn("Aborted", out)
 		self.assertEqual(1, len(notes0.list_notes()))
 
 	def test_delete_command_empty_id_shows_error(self):
-		out = self._run(["delete", "", "quit"])
+		out = self._run(["delete", "", "exit"])
 		self.assertIn("Error", out)
 
 	def test_delete_command_not_found_shows_error(self):
-		out = self._run(["delete", "no_such_id", "y", "quit"])
+		out = self._run(["delete", "no_such_id", "y", "exit"])
 		self.assertIn("Error", out)
 
 	def test_unknown_command_shows_hint(self):
-		out = self._run(["badcmd", "quit"])
+		out = self._run(["badcmd", "exit"])
 		self.assertIn("Unknown command", out)
 
 
@@ -1104,7 +1104,7 @@ class TestMainExtraBranches(unittest.TestCase):
 		return stream.getvalue()
 
 	def test_main_init_command(self):
-		self._main(["notes0.py", "init"])
+		self._main(["notes0.py", "folder"])
 		self.assertTrue(self.test_dir.exists())
 
 	def test_main_create_with_two_args(self):

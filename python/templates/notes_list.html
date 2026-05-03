@@ -1,26 +1,152 @@
 {% extends "base.html" %}
 {% block title %}My Notes{% endblock %}
 {% block content %}
+<style>
+  .notes-grid {
+    display: grid;
+    gap: 0.75rem;
+  }
+  .note-card {
+    cursor: grab;
+    transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+  }
+  .note-card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 14px rgba(138, 90, 68, 0.16);
+  }
+  .note-card.dragging {
+    opacity: 0.45;
+    cursor: grabbing;
+  }
+  .note-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .drag-handle {
+    color: #8a5a44;
+    font-size: 0.95rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    user-select: none;
+  }
+  .timestamp {
+    font-size: 0.82rem;
+    color: #9a7b6b;
+    margin-top: 0.35rem;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+</style>
+
 <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:.5rem;">
   <h1>My Notes</h1>
   {% if can_write %}
-  <a href="/notes/new" class="btn btn-primary">+ New note</a>
+  <a href="/notes/new" class="btn btn-primary"><i class="fa-solid fa-plus"></i> New note</a>
   {% endif %}
 </div>
 
 {% if notes %}
+<p class="card-meta" style="margin-bottom:.5rem;">Drag and drop cards to reorder your notes list.</p>
+<div id="notes-list" class="notes-grid">
 {% for note in notes %}
-<div class="card">
-  <div class="card-title"><a href="/notes/{{ note.id }}">{{ note.title }}</a></div>
-  <div class="card-meta">
-    Modified {{ note.modified[:10] }}
+<article class="card note-card" draggable="true" data-note-id="{{ note.id }}">
+  <div class="note-card-header">
+    <div class="card-title"><a href="/notes/{{ note.id }}">{{ note.title }}</a></div>
+    <span class="drag-handle" title="Drag to reorder"><i class="fa-solid fa-grip-vertical"></i></span>
+  </div>
+  <div class="card-meta" style="margin-top:0.35rem;">
     {% for tag in note.tags %}<span class="tag">{{ tag }}</span>{% endfor %}
   </div>
+  <div class="timestamp"><i class="fa-regular fa-clock"></i> {{ note.modified[:19].replace('T', ' ') }}</div>
   {% if note.preview %}
   <div class="preview">{{ note.preview[:120] }}{% if note.preview|length > 120 %}…{% endif %}</div>
+  {% else %}
+  <div class="preview"><em>No preview text yet.</em></div>
   {% endif %}
-</div>
+</article>
 {% endfor %}
+</div>
+
+<script>
+  (function () {
+    const list = document.getElementById("notes-list");
+    if (!list) return;
+
+    const storageKey = "notes-order:{{ request.session.get('username') }}";
+
+    function cards() {
+      return Array.from(list.querySelectorAll(".note-card"));
+    }
+
+    function saveOrder() {
+      const order = cards().map((card) => card.dataset.noteId);
+      localStorage.setItem(storageKey, JSON.stringify(order));
+    }
+
+    function restoreOrder() {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) return;
+      let preferred;
+      try {
+        preferred = JSON.parse(raw);
+      } catch (err) {
+        return;
+      }
+      const map = new Map(cards().map((card) => [card.dataset.noteId, card]));
+      preferred.forEach((id) => {
+        const card = map.get(id);
+        if (card) list.appendChild(card);
+      });
+    }
+
+    function afterElement(container, y) {
+      const draggableCards = cards().filter((el) => !el.classList.contains("dragging"));
+      return draggableCards.reduce(
+        (closest, child) => {
+          const rect = child.getBoundingClientRect();
+          const offset = y - rect.top - rect.height / 2;
+          if (offset < 0 && offset > closest.offset) {
+            return { offset, element: child };
+          }
+          return closest;
+        },
+        { offset: Number.NEGATIVE_INFINITY, element: null }
+      ).element;
+    }
+
+    list.addEventListener("dragstart", (event) => {
+      const card = event.target.closest(".note-card");
+      if (!card) return;
+      card.classList.add("dragging");
+      event.dataTransfer.effectAllowed = "move";
+    });
+
+    list.addEventListener("dragend", (event) => {
+      const card = event.target.closest(".note-card");
+      if (!card) return;
+      card.classList.remove("dragging");
+      saveOrder();
+    });
+
+    list.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      const dragging = list.querySelector(".note-card.dragging");
+      if (!dragging) return;
+      const next = afterElement(list, event.clientY);
+      if (!next) {
+        list.appendChild(dragging);
+      } else {
+        list.insertBefore(dragging, next);
+      }
+    });
+
+    restoreOrder();
+  })();
+</script>
 {% else %}
 <p class="empty-hint">No notes yet. <a href="/notes/new">Create your first note.</a></p>
 {% endif %}

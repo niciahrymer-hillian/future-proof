@@ -1,10 +1,17 @@
 {% extends "base.html" %}
-{% block title %}Login – Notes{% endblock %}
+{% block title %}Sign In - The Handy Dandy Notebook{% endblock %}
 {% block content %}
-<div style="max-width:360px;margin:3rem auto;">
-  <h1>Sign in</h1>
+<div style="max-width:420px;margin:3rem auto;">
+  <h1 class="brand-70s" style="margin-bottom:0.2rem;">The Handy Dandy Notebook</h1>
+  <p style="color:#8a6b5a;margin-bottom:1rem;font-family:Georgia, 'Times New Roman', serif;font-style:italic;">A cozy place for ideas, notes, and reflections.</p>
+
+  <div style="display:flex;gap:0.5rem;margin-bottom:1rem;">
+    <a href="/login" class="btn btn-primary" style="flex:1;justify-content:center;"><i class="fa-solid fa-right-to-bracket"></i> Sign in</a>
+    <a href="/register" class="btn btn-secondary" style="flex:1;justify-content:center;"><i class="fa-solid fa-user-plus"></i> Sign up</a>
+  </div>
+
   {% if error %}
-  <div class="error">{{ error }}</div>
+  <div class="error"><i class="fa-solid fa-circle-exclamation"></i> {{ error }}</div>
   {% endif %}
   <div class="card" style="margin-top:1rem;">
     <form method="post" action="/login">
@@ -16,7 +23,7 @@
         <label for="password">Password</label>
         <input type="password" id="password" name="password" autocomplete="current-password" required>
       </div>
-      <button type="submit" class="btn btn-primary" style="width:100%;">Sign in</button>
+      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;"><i class="fa-solid fa-right-to-bracket"></i> Sign in</button>
     </form>
   </div>
 </div>

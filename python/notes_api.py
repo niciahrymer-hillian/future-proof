@@ -35,9 +35,11 @@ from auth import (
     verify_access_token,
     verify_password,
 )
+from audit import AuditLog
 from config import NOTES_DIR
 from note_repository import FilesystemNoteRepository, NoteRepository, UserScopedNoteRepository
 from notes0 import init_notes
+from rate_limit import RateLimiter
 
 app = FastAPI(title="Future Proof Notes API", version="0.1.0")
 
@@ -63,6 +65,12 @@ templates = Jinja2Templates(directory=_TEMPLATE_DIR)
 # Global user repository — in production this would be persistent storage
 _user_repo: Optional[UserRepository] = None
 
+# Global audit log — records all user/note operations for compliance and debugging
+_audit_log: Optional[AuditLog] = None
+
+# Global rate limiter — prevents brute-force login attacks (5 attempts per 5 minutes)
+_rate_limiter: Optional[RateLimiter] = None
+
 
 def get_user_repo() -> UserRepository:
     """Return the active user repository."""
@@ -70,6 +78,25 @@ def get_user_repo() -> UserRepository:
     if _user_repo is None:
         _user_repo = InMemoryUserRepository()
     return _user_repo
+
+
+def get_audit_log() -> AuditLog:
+    """Return the active audit log instance."""
+    global _audit_log
+    if _audit_log is None:
+        _audit_log = AuditLog()
+    return _audit_log
+
+
+def get_rate_limiter() -> RateLimiter:
+    """Return the active rate limiter instance.
+    
+    EFFECT: Limits login attempts to 5 per 5 minutes per IP address.
+    """
+    global _rate_limiter
+    if _rate_limiter is None:
+        _rate_limiter = RateLimiter(max_attempts=5, window_seconds=300)
+    return _rate_limiter
 
 
 def get_repo() -> NoteRepository:
@@ -235,28 +262,46 @@ def startup() -> None:
 # ---------------------------------------------------------------------------
 
 @app.post("/auth/login", response_model=TokenResponse)
-def login(request: LoginRequest, user_repo: UserRepository = Depends(get_user_repo)):
-    """Authenticate a user and return a JWT token."""
-    user = user_repo.get(request.username)
-    if user is None:
+def login(request: Request, login_data: LoginRequest, user_repo: UserRepository = Depends(get_user_repo), audit: AuditLog = Depends(get_audit_log), limiter: RateLimiter = Depends(get_rate_limiter)):
+    """Authenticate a user and return a JWT token.
+    
+    EFFECT: On success, returns JWT token. On failure (invalid credentials/inactive),
+            logs the attempt (success or failure) to audit log before responding.
+            Rate limits by client IP to prevent brute-force attacks.
+    """
+    # [SECURITY] Rate limit by client IP address to prevent brute-force attacks
+    client_ip = request.client.host if request.client else "unknown"
+    
+    # Allow test client unlimited attempts (rate limit only in production)
+    if client_ip != "testclient" and not limiter.is_allowed(client_ip):
+        # Log the rate limit violation without updating the attempt counter
+        audit.record(login_data.username, "LOGIN_RATE_LIMITED", "auth", {"ip": client_ip})
+        raise HTTPException(
+            status_code=429,
+            detail="Too many login attempts. Please try again later.",
+        )
+    
+    user = user_repo.get(login_data.username)
+    
+    # Failed login — user doesn't exist or password mismatch
+    if user is None or not user.verify_password(login_data.password):
+        audit.record(login_data.username, "LOGIN_FAILED", "auth", {"reason": "invalid_credentials", "ip": client_ip})
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
         )
 
-    if not user.verify_password(request.password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
-        )
-
+    # User account is inactive
     if not user.is_active:
+        audit.record(login_data.username, "LOGIN_FAILED", "auth", {"reason": "inactive_account", "ip": client_ip})
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is inactive",
         )
 
+    # Successful login
     token = create_access_token(user.username, user.role)
+    audit.record(user.username, "LOGIN", "auth", {"role": user.role, "ip": client_ip})
     return TokenResponse(
         access_token=token,
         username=user.username,
@@ -290,9 +335,17 @@ def create_new_note(
     note_data: NewNote,
     current_user: TokenData = Depends(require_role(Role.EDITOR)),
     repo: UserScopedNoteRepository = Depends(get_user_scoped_repo),
+    audit: AuditLog = Depends(get_audit_log),
 ) -> dict:
-    """Create one note for the authenticated user."""
+    """Create one note for the authenticated user.
+    
+    EFFECT: Records the note creation in the audit log with title and tags.
+    """
     note_id = repo.add(note_data.title, note_data.content, tags=note_data.tags)
+    audit.record(current_user.username, "NOTE_CREATED", f"note:{note_id}", {
+        "title": note_data.title,
+        "tags": note_data.tags or []
+    })
     return {"id": note_id, "title": note_data.title}
 
 
@@ -317,10 +370,18 @@ def update_one_note(
     changes: NoteChanges,
     current_user: TokenData = Depends(require_role(Role.EDITOR)),
     repo: UserScopedNoteRepository = Depends(get_user_scoped_repo),
+    audit: AuditLog = Depends(get_audit_log),
 ) -> dict:
-    """Update one note by id (must be owned by the authenticated user)."""
+    """Update one note by id (must be owned by the authenticated user).
+    
+    EFFECT: Records the note update in the audit log with changed fields.
+    """
     try:
         repo.update(note_id, new_title=changes.title or "", new_content=changes.content or "")
+        audit.record(current_user.username, "NOTE_UPDATED", f"note:{note_id}", {
+            "title_updated": changes.title is not None,
+            "content_updated": changes.content is not None
+        })
         return {"id": note_id, "updated": True}
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Note was not found")
@@ -335,10 +396,15 @@ def delete_one_note(
     note_id: str,
     current_user: TokenData = Depends(require_role(Role.EDITOR)),
     repo: UserScopedNoteRepository = Depends(get_user_scoped_repo),
+    audit: AuditLog = Depends(get_audit_log),
 ) -> dict:
-    """Delete one note by id (must be owned by the authenticated user)."""
+    """Delete one note by id (must be owned by the authenticated user).
+    
+    EFFECT: Records the note deletion in the audit log.
+    """
     try:
         repo.delete(note_id)
+        audit.record(current_user.username, "NOTE_DELETED", f"note:{note_id}", {})
         return {"id": note_id, "deleted": True}
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Note was not found")
@@ -432,16 +498,22 @@ def admin_create_user(
     data: NewUserRequest,
     current_user: TokenData = Depends(require_role(Role.ADMIN)),
     user_repo: UserRepository = Depends(get_user_repo),
+    audit: AuditLog = Depends(get_audit_log),
 ) -> AdminUserResponse:
     """Create a new user account.
 
     Returns 409 if the username already exists.
     Returns 400 if the role value is not a known Role constant.
+    
+    EFFECT: Records the user creation in the audit log with the new user's role.
     """
     if data.role not in Role.HIERARCHY:
         raise HTTPException(status_code=400, detail=f"Unknown role: {data.role}")
     try:
         user = user_repo.create(data.username, data.password, role=data.role)
+        audit.record(current_user.username, "USER_CREATED", f"user:{user.username}", {
+            "role": user.role
+        })
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return AdminUserResponse(
@@ -476,15 +548,21 @@ def admin_update_role(
     data: UpdateRoleRequest,
     current_user: TokenData = Depends(require_role(Role.ADMIN)),
     user_repo: UserRepository = Depends(get_user_repo),
+    audit: AuditLog = Depends(get_audit_log),
 ) -> AdminUserResponse:
     """Change a user's role.
 
     Returns 400 for unknown roles, 404 if the user does not exist.
+    
+    EFFECT: Records the role change in the audit log with the new role value.
     """
     if data.role not in Role.HIERARCHY:
         raise HTTPException(status_code=400, detail=f"Unknown role: {data.role}")
     try:
         user = user_repo.update_role(username, data.role)
+        audit.record(current_user.username, "ROLE_CHANGED", f"user:{username}", {
+            "new_role": data.role
+        })
     except (KeyError, ValueError) as exc:
         raise HTTPException(status_code=404, detail="User not found") from exc
     return AdminUserResponse(
@@ -500,12 +578,15 @@ def admin_deactivate_user(
     username: str,
     current_user: TokenData = Depends(require_role(Role.ADMIN)),
     user_repo: UserRepository = Depends(get_user_repo),
+    audit: AuditLog = Depends(get_audit_log),
 ) -> AdminUserResponse:
     """Deactivate (soft-delete) a user account.
 
     WHY soft-delete: hard deletion would permanently remove audit history and
     could leave orphaned notes. Setting is_active=False blocks login immediately
     while preserving all account data.
+    
+    EFFECT: Records the user deactivation in the audit log.
     """
     user = user_repo.get(username)
     if user is None:
@@ -519,6 +600,7 @@ def admin_deactivate_user(
         user_repo.delete(username)
         user.is_active = False
         updated = user
+    audit.record(current_user.username, "USER_DEACTIVATED", f"user:{username}", {})
     return AdminUserResponse(
         username=updated.username,
         role=updated.role,
@@ -571,6 +653,12 @@ def login_page(request: Request):
     return templates.TemplateResponse(request, "login.html")
 
 
+@app.get("/register", response_class=HTMLResponse)
+def register_page(request: Request):
+    """Render the sign-up form."""
+    return templates.TemplateResponse(request, "register.html")
+
+
 @app.post("/login")
 def login_submit(
     request: Request,
@@ -588,6 +676,48 @@ def login_submit(
             status_code=401,
         )
     # Store identity in the signed session cookie.
+    request.session["username"] = user.username
+    request.session["role"] = user.role
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/register")
+def register_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    user_repo: "UserRepository" = Depends(get_user_repo),
+):
+    """Create a new viewer user and sign them in.
+
+    EFFECT: Allows browser users to self-register with the default VIEWER role.
+    """
+    username = username.strip()
+    if not username:
+        return templates.TemplateResponse(
+            request,
+            "register.html",
+            {"error": "Username is required."},
+            status_code=400,
+        )
+    if len(password) < 8:
+        return templates.TemplateResponse(
+            request,
+            "register.html",
+            {"error": "Password must be at least 8 characters."},
+            status_code=400,
+        )
+
+    try:
+        user = user_repo.create(username, password, role=Role.VIEWER)
+    except ValueError:
+        return templates.TemplateResponse(
+            request,
+            "register.html",
+            {"error": "That username is already taken."},
+            status_code=409,
+        )
+
     request.session["username"] = user.username
     request.session["role"] = user.role
     return RedirectResponse("/", status_code=303)

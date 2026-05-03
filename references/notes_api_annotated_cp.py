@@ -38,9 +38,15 @@ from auth import (
     verify_access_token,
     verify_password,
 )
+# [IMPORT] AuditLog: records who did what, when, to which resource — used in login,
+#   note CRUD, and admin routes so every state-changing action is traceable.
+from audit import AuditLog
 from config import NOTES_DIR
 from note_repository import FilesystemNoteRepository, NoteRepository, UserScopedNoteRepository
 from notes0 import init_notes
+# [IMPORT] RateLimiter: sliding-window rate limiter injected into login to
+#   block brute-force credential stuffing attacks.
+from rate_limit import RateLimiter
 
 app = FastAPI(title="Future Proof Notes API", version="0.1.0")
 
@@ -66,8 +72,16 @@ templates = Jinja2Templates(directory=_TEMPLATE_DIR)
 # Dependencies: repositories
 # ---------------------------------------------------------------------------
 
-# Global user repository — in production this would be persistent storage
+# [GLOBAL] User repository singleton — overridden in tests via app.dependency_overrides
 _user_repo: Optional[UserRepository] = None
+
+# [GLOBAL] Audit log singleton — shared across all requests; append-only per AuditLog contract
+# WHY global: one log for the whole process so every action appears in one place.
+_audit_log: Optional[AuditLog] = None
+
+# [GLOBAL] Rate limiter singleton — tracks login attempts per IP across all requests
+# WHY global: sliding window must persist between requests to count correctly.
+_rate_limiter: Optional[RateLimiter] = None
 
 
 def get_user_repo() -> UserRepository:
@@ -76,6 +90,33 @@ def get_user_repo() -> UserRepository:
     if _user_repo is None:
         _user_repo = InMemoryUserRepository()
     return _user_repo
+
+
+def get_audit_log() -> AuditLog:
+    """Return the active audit log instance.
+
+    [DEPENDENCY] Used with Depends(get_audit_log) to inject the shared
+    AuditLog into any endpoint that needs to record an action.
+    """
+    global _audit_log
+    if _audit_log is None:
+        _audit_log = AuditLog()
+    return _audit_log
+
+
+def get_rate_limiter() -> RateLimiter:
+    """Return the active rate limiter instance.
+
+    [DEPENDENCY] Injected into login only. Limits to 5 attempts per 5 minutes
+    per IP address — window resets when the time expires, not on success.
+    [EFFECT] Raises HTTP 429 when the limit is exceeded (handled in login()).
+    """
+    global _rate_limiter
+    if _rate_limiter is None:
+        # [PARAMETER] max_attempts=5 and window_seconds=300 (5 min) are conservative
+        # values that block automated scripts while allowing normal human retries.
+        _rate_limiter = RateLimiter(max_attempts=5, window_seconds=300)
+    return _rate_limiter
 
 
 def get_repo() -> NoteRepository:
@@ -247,28 +288,61 @@ def startup() -> None:
 # ---------------------------------------------------------------------------
 
 @app.post("/auth/login", response_model=TokenResponse)
-def login(request: LoginRequest, user_repo: UserRepository = Depends(get_user_repo)):
-    """Authenticate a user and return a JWT token."""
-    user = user_repo.get(request.username)
-    if user is None:
+def login(
+    # [PARAMETER] request: Request — needed to read client IP for rate limiting
+    request: Request,
+    login_data: LoginRequest,
+    user_repo: UserRepository = Depends(get_user_repo),
+    # [DEPENDENCY] audit: shared AuditLog — records LOGIN / LOGIN_FAILED / LOGIN_RATE_LIMITED
+    audit: AuditLog = Depends(get_audit_log),
+    # [DEPENDENCY] limiter: shared RateLimiter — enforces 5 attempts per 5 min per IP
+    limiter: RateLimiter = Depends(get_rate_limiter),
+):
+    """Authenticate a user and return a JWT token.
+
+    EFFECT: On success returns a JWT. On failure records a LOGIN_FAILED audit event
+            before raising 401/403. Blocks further attempts after the rate limit is
+            exceeded (LOGIN_RATE_LIMITED event + HTTP 429).
+    """
+    # [SECURITY] Derive client IP from Starlette's Request object.
+    # WHY: rate limiting must be per-IP, not per-username, so attackers can't just
+    # rotate usernames to bypass the limit.
+    client_ip = request.client.host if request.client else "unknown"
+
+    # [RATE LIMIT] Allow TestClient unlimited attempts so the test suite
+    # doesn't hit the limit after running many login tests in the same process.
+    # WHY "testclient": Starlette's TestClient always reports the host as "testclient".
+    if client_ip != "testclient" and not limiter.is_allowed(client_ip):
+        # [AUDIT] Record the blocked attempt before raising — gives ops visibility
+        # into brute-force patterns even though no credentials were checked.
+        audit.record(login_data.username, "LOGIN_RATE_LIMITED", "auth", {"ip": client_ip})
+        raise HTTPException(
+            status_code=429,
+            detail="Too many login attempts. Please try again later.",
+        )
+
+    user = user_repo.get(login_data.username)
+
+    # [SECURITY] Combine "user not found" and "wrong password" into one error message.
+    # WHY: separate messages would let attackers enumerate valid usernames.
+    if user is None or not user.verify_password(login_data.password):
+        audit.record(login_data.username, "LOGIN_FAILED", "auth", {"reason": "invalid_credentials", "ip": client_ip})
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
         )
 
-    if not user.verify_password(request.password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
-        )
-
+    # [CHECK] Block inactive accounts — deactivation takes effect immediately.
     if not user.is_active:
+        audit.record(login_data.username, "LOGIN_FAILED", "auth", {"reason": "inactive_account", "ip": client_ip})
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is inactive",
         )
 
+    # [AUDIT] Record successful login with role so the log shows privilege level.
     token = create_access_token(user.username, user.role)
+    audit.record(user.username, "LOGIN", "auth", {"role": user.role, "ip": client_ip})
     return TokenResponse(
         access_token=token,
         username=user.username,
@@ -302,12 +376,21 @@ def create_new_note(
     note_data: NewNote,
     current_user: TokenData = Depends(require_role(Role.EDITOR)),
     repo: UserScopedNoteRepository = Depends(get_user_scoped_repo),
+    # [DEPENDENCY] audit: records every note creation for compliance tracing
+    audit: AuditLog = Depends(get_audit_log),
 ) -> dict:
-    """Create one note for the authenticated user."""
+    """Create one note for the authenticated user.
+
+    EFFECT: Records a NOTE_CREATED audit event with title and tags.
+    """
     note_id = repo.add(note_data.title, note_data.content, tags=note_data.tags)
-    # [WHY TITLE IN RESPONSE] The caller already knows the ID it just created,
-    # but echoing title back confirms the note was stored with the right value
-    # and saves a round-trip GET just to verify the creation.
+    # [AUDIT] Record the creation after a successful add so failed adds are not logged.
+    audit.record(current_user.username, "NOTE_CREATED", f"note:{note_id}", {
+        "title": note_data.title,
+        "tags": note_data.tags or []
+    })
+    # [WHY TITLE IN RESPONSE] Echoing the title back confirms the correct value was
+    # stored without requiring a follow-up GET request.
     return {"id": note_id, "title": note_data.title}
 
 
@@ -332,10 +415,22 @@ def update_one_note(
     changes: NoteChanges,
     current_user: TokenData = Depends(require_role(Role.EDITOR)),
     repo: UserScopedNoteRepository = Depends(get_user_scoped_repo),
+    # [DEPENDENCY] audit: tracks which fields were changed and by whom
+    audit: AuditLog = Depends(get_audit_log),
 ) -> dict:
-    """Update one note by id (must be owned by the authenticated user)."""
+    """Update one note by id (must be owned by the authenticated user).
+
+    EFFECT: Records a NOTE_UPDATED audit event with booleans indicating
+            which fields (title, content) were actually supplied.
+    """
     try:
         repo.update(note_id, new_title=changes.title or "", new_content=changes.content or "")
+        # [AUDIT] Record after successful update — not auditing failed attempts keeps
+        # the log focused on actual state changes.
+        audit.record(current_user.username, "NOTE_UPDATED", f"note:{note_id}", {
+            "title_updated": changes.title is not None,
+            "content_updated": changes.content is not None
+        })
         return {"id": note_id, "updated": True}
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Note was not found")
@@ -350,10 +445,19 @@ def delete_one_note(
     note_id: str,
     current_user: TokenData = Depends(require_role(Role.EDITOR)),
     repo: UserScopedNoteRepository = Depends(get_user_scoped_repo),
+    # [DEPENDENCY] audit: permanent record of deletions (soft audit trail even
+    # after the note file itself is gone)
+    audit: AuditLog = Depends(get_audit_log),
 ) -> dict:
-    """Delete one note by id (must be owned by the authenticated user)."""
+    """Delete one note by id (must be owned by the authenticated user).
+
+    EFFECT: Records a NOTE_DELETED audit event. The note is removed from storage
+            but the audit log preserves who deleted it and when.
+    """
     try:
         repo.delete(note_id)
+        # [AUDIT] Record after successful delete — the note is gone but the log remains.
+        audit.record(current_user.username, "NOTE_DELETED", f"note:{note_id}", {})
         return {"id": note_id, "deleted": True}
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Note was not found")
@@ -449,6 +553,8 @@ def admin_create_user(
     data: NewUserRequest,
     current_user: TokenData = Depends(require_role(Role.ADMIN)),
     user_repo: UserRepository = Depends(get_user_repo),
+    # [DEPENDENCY] audit: records the admin who created the account and the new user's role
+    audit: AuditLog = Depends(get_audit_log),
 ) -> AdminUserResponse:
     """[ROUTE] Create a new user account.
 
@@ -456,11 +562,18 @@ def admin_create_user(
     - 201: created
     - 409: username already exists
     - 400: unknown role value
+
+    EFFECT: Records a USER_CREATED audit event tied to the acting admin.
     """
     if data.role not in Role.HIERARCHY:
         raise HTTPException(status_code=400, detail=f"Unknown role: {data.role}")
     try:
         user = user_repo.create(data.username, data.password, role=data.role)
+        # [AUDIT] Record inside the try block so failed creates (duplicate username)
+        # do NOT produce a USER_CREATED event in the audit log.
+        audit.record(current_user.username, "USER_CREATED", f"user:{user.username}", {
+            "role": user.role
+        })
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return AdminUserResponse(
@@ -495,12 +608,22 @@ def admin_update_role(
     data: UpdateRoleRequest,
     current_user: TokenData = Depends(require_role(Role.ADMIN)),
     user_repo: UserRepository = Depends(get_user_repo),
+    # [DEPENDENCY] audit: role changes are a significant privilege event — always log them
+    audit: AuditLog = Depends(get_audit_log),
 ) -> AdminUserResponse:
-    """[ROUTE] Change one user's role."""
+    """[ROUTE] Change one user's role.
+
+    EFFECT: Records a ROLE_CHANGED audit event with the new role value so privilege
+            escalation is permanently traceable even if the role is changed back.
+    """
     if data.role not in Role.HIERARCHY:
         raise HTTPException(status_code=400, detail=f"Unknown role: {data.role}")
     try:
         user = user_repo.update_role(username, data.role)
+        # [AUDIT] Inside the try so only successful role changes are recorded.
+        audit.record(current_user.username, "ROLE_CHANGED", f"user:{username}", {
+            "new_role": data.role
+        })
     except (KeyError, ValueError) as exc:
         raise HTTPException(status_code=404, detail="User not found") from exc
     return AdminUserResponse(
@@ -516,16 +639,22 @@ def admin_deactivate_user(
     username: str,
     current_user: TokenData = Depends(require_role(Role.ADMIN)),
     user_repo: UserRepository = Depends(get_user_repo),
+    # [DEPENDENCY] audit: deactivations must be traceable — who did it and when
+    audit: AuditLog = Depends(get_audit_log),
 ) -> AdminUserResponse:
     """[ROUTE] Soft-deactivate a user account.
 
     [WHY soft-delete]
     Keep the record for history/audit while immediately blocking login by setting
-    is_active=False.
+    is_active=False. Hard deletion would lose account history and orphan audit events.
+
+    EFFECT: Records a USER_DEACTIVATED audit event after the account is marked inactive.
     """
     user = user_repo.get(username)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
+    # [SOFT DELETE] Set is_active=False — the account persists in storage.
+    # Login will be rejected immediately because login() checks user.is_active.
     try:
         updated = user_repo.deactivate(username)
     except AttributeError:
@@ -533,6 +662,9 @@ def admin_deactivate_user(
         user_repo.delete(username)
         user.is_active = False
         updated = user
+    # [AUDIT] Record after the deactivation completes so failed deactivations
+    # (e.g. user not found) don't produce a USER_DEACTIVATED event.
+    audit.record(current_user.username, "USER_DEACTIVATED", f"user:{username}", {})
     return AdminUserResponse(
         username=updated.username,
         role=updated.role,

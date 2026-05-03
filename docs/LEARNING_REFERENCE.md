@@ -247,3 +247,62 @@ When implementing each new card, append:
 5. Any follow-up risk/next step
 
 Keeping this structure makes the project easier to reuse as a template for future builds.
+
+---
+
+## Recent UI/UX and Launch Config Updates (2026-05-03)
+
+**What was added/changed:**
+- Re-themed frontend to a cream + warm retro palette with accent colors:
+  - `#EC906A`, `#F4914E`, `#FFE0BB`, `#DEB158`
+- Updated branding text to **"The Handy Dandy Notebook"** on login and nav surfaces.
+- Added 70s-style display font stack for branding/title areas (`Fascinate`, `Chicle`, `Ranchers`, `Monoton`, `Oi`) while keeping app body typography readable (`Tahoma`, `Georgia`).
+- Added rounded retro button style, warmer hover transitions, and subtle paper-texture background layers.
+- Added `GET /register` + `POST /register` and a full sign-up page (`register.html`) so browser users can self-register (default role: `VIEWER`).
+- Upgraded notes list cards to include richer previews and timestamp display.
+- Added drag-and-drop card reordering on the notes list page with per-user browser persistence via `localStorage`.
+- Added a global **Soft/Bold theme intensity toggle** (saved in `localStorage` key `handy-dandy-theme-intensity`).
+
+**Launch/task updates:**
+- Standard HTML launch port updated to **8010** to avoid conflicts seen on 8001/8002.
+- Annotated task config in both:
+  - `.vscode/tasks.json` (runtime task used by VS Code)
+  - `docs/tasks.json` (documentation mirror)
+- Added task metadata fields (`detail`, `options.cwd`, `presentation`, `problemMatcher`) so the launch behavior is explicit and repeatable.
+
+**What it affects:**
+- `python/templates/base.html`
+- `python/templates/login.html`
+- `python/templates/register.html`
+- `python/templates/notes_list.html`
+- `python/templates/search.html`
+- `python/notes_api.py`
+- `.vscode/tasks.json`
+- `docs/tasks.json`
+
+**Verification:**
+- Frontend regression suite remains green: `python/Tests/test_frontend.py` => **18 passed**.
+
+---
+
+## Final Pre-Commit Save Note (2026-05-03)
+
+This final note captures the exact state intended for commit.
+
+**Final UI state:**
+- App branding/title uses **"The Handy Dandy Notebook"**.
+- Retro cream/orange/brown theme applied using palette values `#EC906A`, `#F4914E`, `#FFE0BB`, `#DEB158`.
+- Login/register pages support sign-in and sign-up paths.
+- Notes list uses preview cards with drag-and-drop reordering persisted per user in browser storage.
+- Theme intensity toggle (Soft/Bold) is active and persisted via localStorage.
+
+**Final launch/task state:**
+- Default HTML run port is `8010`.
+- `.vscode/tasks.json` includes fully annotated tasks (with inline comments).
+- Default build task is now **"Launch HTML App + Open Browser"**.
+- `docs/tasks.json` mirrors the same annotated task configuration for documentation consistency.
+
+**Pre-commit sanity checks:**
+- Frontend test suite passes: `python -m pytest python/Tests/test_frontend.py -q` => **18 passed**.
+
+Commit intent: preserve this configuration as the baseline launchable, themed HTML experience.
