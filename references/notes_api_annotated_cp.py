@@ -247,8 +247,10 @@ class NewUserRequest(BaseModel):
     username: str = Field(min_length=1)
     # [SECURITY] minimum password length reduces trivial weak-password mistakes.
     password: str = Field(min_length=8)
-    # [DEFAULT] if omitted, create a read-only VIEWER account.
-    role: str = Role.VIEWER
+    # [DEFAULT] if omitted, create an EDITOR account so users can fully use the app.
+    role: str = Role.EDITOR
+    # [FIELD] Optional hint used for self-service password recovery.
+    password_hint: Optional[str] = None
 
 
 class UpdateRoleRequest(BaseModel):
@@ -568,7 +570,12 @@ def admin_create_user(
     if data.role not in Role.HIERARCHY:
         raise HTTPException(status_code=400, detail=f"Unknown role: {data.role}")
     try:
-        user = user_repo.create(data.username, data.password, role=data.role)
+        user = user_repo.create(
+            data.username,
+            data.password,
+            role=data.role,
+            password_hint=data.password_hint,
+        )
         # [AUDIT] Record inside the try block so failed creates (duplicate username)
         # do NOT produce a USER_CREATED event in the audit log.
         audit.record(current_user.username, "USER_CREATED", f"user:{user.username}", {
@@ -722,6 +729,117 @@ def login_page(request: Request):
     return templates.TemplateResponse(request, "login.html")
 
 
+@app.get("/register", response_class=HTMLResponse)
+def register_page(request: Request):
+    """Render the sign-up form."""
+    return templates.TemplateResponse(request, "register.html")
+
+
+@app.post("/register")
+def register_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    password_hint: str = Form(default=""),
+    user_repo: "UserRepository" = Depends(get_user_repo),
+):
+    """Create a new EDITOR user and sign them in.
+
+    [EFFECT] Self-registered users can create/edit/delete their own notes
+    immediately after sign-up.
+    """
+    username = username.strip()
+    if not username:
+        return templates.TemplateResponse(
+            request,
+            "register.html",
+            {"error": "Username is required."},
+            status_code=400,
+        )
+    if len(password) < 8:
+        return templates.TemplateResponse(
+            request,
+            "register.html",
+            {"error": "Password must be at least 8 characters."},
+            status_code=400,
+        )
+
+    try:
+        user = user_repo.create(
+            username,
+            password,
+            role=Role.EDITOR,
+            password_hint=password_hint,
+        )
+    except ValueError:
+        return templates.TemplateResponse(
+            request,
+            "register.html",
+            {"error": "That username is already taken."},
+            status_code=409,
+        )
+
+    request.session["username"] = user.username
+    request.session["role"] = user.role
+    return RedirectResponse("/", status_code=303)
+
+
+@app.get("/forgot-password", response_class=HTMLResponse)
+def forgot_password_page(request: Request):
+    """Render the forgot-password form."""
+    return templates.TemplateResponse(request, "forgot_password.html")
+
+
+@app.post("/forgot-password", response_class=HTMLResponse)
+def forgot_password_submit(
+    request: Request,
+    username: str = Form(...),
+    password_hint: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...),
+    user_repo: "UserRepository" = Depends(get_user_repo),
+):
+    """Reset password after validating username + password hint."""
+    username = username.strip()
+    if not username:
+        return templates.TemplateResponse(
+            request,
+            "forgot_password.html",
+            {"error": "Username is required."},
+            status_code=400,
+        )
+    if len(new_password) < 8:
+        return templates.TemplateResponse(
+            request,
+            "forgot_password.html",
+            {"error": "New password must be at least 8 characters."},
+            status_code=400,
+        )
+    if new_password != confirm_password:
+        return templates.TemplateResponse(
+            request,
+            "forgot_password.html",
+            {"error": "Passwords do not match."},
+            status_code=400,
+        )
+
+    user = user_repo.get(username)
+    if user is None or not user_repo.verify_password_hint(username, password_hint):
+        return templates.TemplateResponse(
+            request,
+            "forgot_password.html",
+            {"error": "Invalid username or password hint."},
+            status_code=401,
+        )
+
+    user_repo.update_password(username, new_password)
+    return templates.TemplateResponse(
+        request,
+        "login.html",
+        {"message": "Password updated. Please sign in with your new password."},
+    )
+
+
 @app.post("/login")
 def login_submit(
     request: Request,
@@ -804,6 +922,8 @@ def create_note_submit(
     """Handle create-note form submission."""
     if not _session_user(request):
         return RedirectResponse("/login", status_code=303)
+    if not _can_write(_session_role(request)):
+        return RedirectResponse("/", status_code=303)
     # [PARSE] Split "alpha, beta" → ["alpha", "beta"], strip whitespace, skip blanks
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
     repo.add(title, content, tags=tag_list)
@@ -862,6 +982,8 @@ def edit_note_submit(
     """Handle edit-note form submission."""
     if not _session_user(request):
         return RedirectResponse("/login", status_code=303)
+    if not _can_write(_session_role(request)):
+        return RedirectResponse(f"/notes/{note_id}", status_code=303)
     try:
         repo.update(note_id, new_title=title, new_content=content)
     except (FileNotFoundError, PermissionError):
@@ -882,6 +1004,8 @@ def delete_note_submit(request: Request, note_id: str, repo: Optional[UserScoped
     """
     if not _session_user(request):
         return RedirectResponse("/login", status_code=303)
+    if not _can_write(_session_role(request)):
+        return RedirectResponse(f"/notes/{note_id}", status_code=303)
     try:
         repo.delete(note_id)
     except (FileNotFoundError, PermissionError):

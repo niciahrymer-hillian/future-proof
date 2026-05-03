@@ -1,0 +1,59 @@
+{# [TEMPLATE] note_edit_annotated_cp.html
+   Annotated reference copy of python/templates/note_edit.html
+
+   [WHY THIS PAGE EXISTS]
+   Provides a pre-filled form for updating an existing note's title and content.
+   The GET handler (edit_note_form) redirects VIEWER users to the detail page
+   before this template is rendered, so only EDITOR/ADMIN see it.
+
+   [CONTEXT VARIABLES] from notes_api.py:edit_note_form()
+     note  — Note object with .id, .title, .content
+     error — optional validation error message
+
+   [ROUTE] GET  /notes/{note_id}/edit → edit_note_form()
+            POST /notes/{note_id}/edit → edit_note_submit()
+#}
+
+{# [EXTEND] base.html provides nav, styles, and theme toggle #}
+{% extends "base.html" %}
+
+{# [BLOCK title] Shows which note is being edited in the browser tab #}
+{% block title %}Edit: {{ note.title }}{% endblock %}
+
+{% block content %}
+<h1>Edit note</h1>
+
+{# [ERROR BLOCK] Server validation errors (e.g. empty title after edit). #}
+{% if error %}
+<div class="error">{{ error }}</div>
+{% endif %}
+
+<div class="card">
+  {# [FORM] POST to /notes/{id}/edit — handler: edit_note_submit()
+     On success: updates note, redirects to /notes/{id} (detail view). #}
+  <form method="post" action="/notes/{{ note.id }}/edit">
+
+    {# [FIELD title]
+       value="{{ note.title }}" pre-fills the current title.
+       autofocus places cursor here so the user can start editing immediately. #}
+    <div class="form-group">
+      <label for="title">Title</label>
+      <input type="text" id="title" name="title" value="{{ note.title }}" autofocus required>
+    </div>
+
+    {# [FIELD content] Textarea pre-filled with existing note body.
+       WHY no tags field: tags are set at creation; editing tags would require
+       a separate UX flow (not currently implemented). #}
+    <div class="form-group">
+      <label for="content">Content</label>
+      <textarea id="content" name="content" required>{{ note.content }}</textarea>
+    </div>
+
+    {# [ACTIONS] Save submits; Cancel is a safe GET back to the detail view. #}
+    <div class="actions">
+      <button type="submit" class="btn btn-primary">Save changes</button>
+      <a href="/notes/{{ note.id }}" class="btn btn-secondary">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

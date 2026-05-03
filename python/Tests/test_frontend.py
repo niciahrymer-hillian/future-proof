@@ -87,6 +87,7 @@ class TestLoginPage(unittest.TestCase):
         self.assertIn("<form", resp.text)
         self.assertIn('name="username"', resp.text)
         self.assertIn('name="password"', resp.text)
+        self.assertIn('/forgot-password', resp.text)
 
     def test_valid_login_redirects_to_home(self):
         """POST /login with valid credentials sets a session cookie and redirects."""
@@ -121,6 +122,95 @@ class TestLoginPage(unittest.TestCase):
         # Then log out
         resp = self.client.post("/logout", follow_redirects=False)
         self.assertIn(resp.status_code, (302, 303))
+
+
+class TestRegistrationAndPasswordRecovery(unittest.TestCase):
+    """Registration and forgotten-password flow tests."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._note_repo, cls._user_repo = make_repos()
+        cls._user_repo.create("recover", "old-password", role=Role.EDITOR, password_hint="bluebird")
+        app.dependency_overrides[get_repo] = lambda: cls._note_repo
+        app.dependency_overrides[get_user_repo] = lambda: cls._user_repo
+        cls.client = TestClient(app, raise_server_exceptions=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        app.dependency_overrides.pop(get_repo, None)
+        app.dependency_overrides.pop(get_user_repo, None)
+
+    def test_register_page_includes_password_hint_field(self):
+        """GET /register shows an optional password-hint input."""
+        resp = self.client.get("/register")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('name="password_hint"', resp.text)
+
+    def test_registered_user_has_write_permissions(self):
+        """Self-registered users should be able to create notes immediately."""
+        register_resp = self.client.post(
+            "/register",
+            data={
+                "username": "newwriter",
+                "password": "newwriter-password",
+                "password_hint": "sunset",
+            },
+            follow_redirects=False,
+        )
+        self.assertIn(register_resp.status_code, (302, 303))
+
+        create_resp = self.client.post(
+            "/notes/new",
+            data={"title": "New writer note", "content": "Allowed to write", "tags": "onboarding"},
+            follow_redirects=False,
+        )
+        self.assertIn(create_resp.status_code, (302, 303))
+
+        notes = self.client.get("/")
+        self.assertEqual(notes.status_code, 200)
+        self.assertIn("New writer note", notes.text)
+
+    def test_forgot_password_page_renders(self):
+        """GET /forgot-password should render the reset form."""
+        resp = self.client.get("/forgot-password")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('name="password_hint"', resp.text)
+        self.assertIn('name="new_password"', resp.text)
+
+    def test_forgot_password_requires_valid_hint(self):
+        """POST /forgot-password should reject invalid username/hint combinations."""
+        resp = self.client.post(
+            "/forgot-password",
+            data={
+                "username": "recover",
+                "password_hint": "wrong-hint",
+                "new_password": "new-password-1",
+                "confirm_password": "new-password-1",
+            },
+        )
+        self.assertEqual(resp.status_code, 401)
+        self.assertIn("Invalid username or password hint", resp.text)
+
+    def test_forgot_password_updates_password_and_allows_login(self):
+        """POST /forgot-password with correct hint updates credentials."""
+        resp = self.client.post(
+            "/forgot-password",
+            data={
+                "username": "recover",
+                "password_hint": "bluebird",
+                "new_password": "new-password-2",
+                "confirm_password": "new-password-2",
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Password updated", resp.text)
+
+        login_resp = self.client.post(
+            "/login",
+            data={"username": "recover", "password": "new-password-2"},
+            follow_redirects=False,
+        )
+        self.assertIn(login_resp.status_code, (302, 303))
 
 
 # ---------------------------------------------------------------------------

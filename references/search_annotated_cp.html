@@ -1,0 +1,116 @@
+{# [TEMPLATE] search_annotated_cp.html
+   Annotated reference copy of python/templates/search.html
+
+   [WHY THIS PAGE EXISTS]
+   Lets users filter their notes by keyword, tag, and date range using a GET
+   form so search queries are bookmarkable and shareable via URL.
+
+   [CONTEXT VARIABLES] from notes_api.py:search_page()
+     results   — list of note summary dicts after filtering
+     query     — current keyword filter value (echoed back into input)
+     tag_query — current tag filter value
+     after     — current "modified after" date filter
+     before    — current "modified before" date filter
+     searched  — bool: True when the user submitted at least one filter.
+                  When False, results contains ALL notes (default browse state).
+
+   [ROUTE] GET /search → search_page()
+#}
+
+{# [EXTEND] base.html provides nav, styles, and theme toggle #}
+{% extends "base.html" %}
+
+{# [BLOCK title] #}
+{% block title %}Search Notes{% endblock %}
+
+{% block content %}
+<h1>Search</h1>
+
+{# [FILTER FORM] Uses GET so query params appear in the URL — shareable links
+   and browser back/forward navigation work correctly.
+   WHY flex wrap: on narrow screens each filter input stacks vertically. #}
+<div class="card">
+  <form method="get" action="/search">
+    <div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:flex-end;">
+
+      {# [FIELD text] Keyword search against note title and preview/content.
+         autofocus so users can start typing immediately on page load. #}
+      <div class="form-group" style="flex:1;min-width:200px;margin-bottom:0;">
+        <label for="text">Keyword</label>
+        <input type="text" id="text" name="text" value="{{ query or '' }}" placeholder="Title or content…" autofocus>
+      </div>
+
+      {# [FIELD tag] Single tag filter. The server checks if the note's tag list
+         contains this value (case-insensitive). #}
+      <div class="form-group" style="flex:1;min-width:150px;margin-bottom:0;">
+        <label for="tag">Tag</label>
+        <input type="text" id="tag" name="tag" value="{{ tag_query or '' }}" placeholder="e.g. python">
+      </div>
+
+      {# [FIELD after] ISO date string lower bound on note.modified.
+         Lexicographic comparison works for ISO 8601 dates (YYYY-MM-DD). #}
+      <div class="form-group" style="flex:1;min-width:130px;margin-bottom:0;">
+        <label for="after">After</label>
+        <input type="text" id="after" name="after" value="{{ after or '' }}" placeholder="YYYY-MM-DD">
+      </div>
+
+      {# [FIELD before] ISO date string upper bound on note.modified. #}
+      <div class="form-group" style="flex:1;min-width:130px;margin-bottom:0;">
+        <label for="before">Before</label>
+        <input type="text" id="before" name="before" value="{{ before or '' }}" placeholder="YYYY-MM-DD">
+      </div>
+
+      {# [SUBMIT] Submits filter values as GET parameters #}
+      <div style="margin-bottom:0;padding-bottom:0.05rem;">
+        <button type="submit" class="btn btn-primary">Search</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+{# [RESULTS SECTION]
+   Two branches controlled by the searched flag:
+     True  → user submitted a query; show count + filtered results (or "no matches").
+     False → user just navigated to /search; show all notes as a browsable default. #}
+{% if searched %}
+<p style="color:#555;margin:.75rem 0 .5rem;">
+  {{ results|length }} result{% if results|length != 1 %}s{% endif %}
+</p>
+
+{% if results %}
+{# [FILTERED RESULTS] Each matching note shown as a card with title, date, tags, preview. #}
+{% for note in results %}
+<div class="card">
+  <div class="card-title" style="font-style:italic;"><a href="/notes/{{ note.id }}">{{ note.title }}</a></div>
+  <div class="card-meta">
+    Modified {{ note.modified[:10] }}
+    {% for tag in note.tags %}<span class="tag">{{ tag }}</span>{% endfor %}
+  </div>
+  {# [PREVIEW] Truncated at 120 chars with ellipsis for long content. #}
+  {% if note.preview %}
+  <div class="preview">{{ note.preview[:120] }}{% if note.preview|length > 120 %}…{% endif %}</div>
+  {% endif %}
+</div>
+{% endfor %}
+
+{% else %}
+{# [EMPTY SEARCH RESULT] Friendly message when no notes match the filter. #}
+<p class="empty-hint">No notes matched your search.</p>
+{% endif %}
+
+{% else %}
+{# [DEFAULT BROWSE] No query submitted yet — show all notes without a count header.
+   WHY show all: gives the user context before they start filtering, rather than
+   showing a blank page. Simpler cards (no preview) keep the list scannable. #}
+{% for note in results %}
+<div class="card">
+  <div class="card-title" style="font-style:italic;"><a href="/notes/{{ note.id }}">{{ note.title }}</a></div>
+  <div class="card-meta">
+    Modified {{ note.modified[:10] }}
+    {% for tag in note.tags %}<span class="tag">{{ tag }}</span>{% endfor %}
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+
+{% endblock %}

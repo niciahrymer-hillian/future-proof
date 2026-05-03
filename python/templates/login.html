@@ -13,6 +13,11 @@
   {% if error %}
   <div class="error"><i class="fa-solid fa-circle-exclamation"></i> {{ error }}</div>
   {% endif %}
+  {% if message %}
+  <div style="background:#ecf9ef;color:#25643a;border-left:4px solid #3a9d57;padding:0.6rem 1rem;border-radius:4px;margin-bottom:1rem;">
+    <i class="fa-solid fa-circle-check"></i> {{ message }}
+  </div>
+  {% endif %}
   <div class="card" style="margin-top:1rem;">
     <form method="post" action="/login">
       <div class="form-group">
@@ -22,6 +27,9 @@
       <div class="form-group">
         <label for="password">Password</label>
         <input type="password" id="password" name="password" autocomplete="current-password" required>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:-0.4rem;margin-bottom:0.9rem;">
+        <a href="/forgot-password" style="font-size:0.9rem;"><i class="fa-solid fa-key"></i> Forgot password?</a>
       </div>
       <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;"><i class="fa-solid fa-right-to-bracket"></i> Sign in</button>
     </form>

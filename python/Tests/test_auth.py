@@ -230,6 +230,27 @@ class TestUserModel(unittest.TestCase):
         )
         self.assertFalse(user.is_active)
 
+    def test_user_verify_password_hint_true_when_matches(self):
+        """User.verify_password_hint should match case-insensitively with trimming."""
+        user = User(
+            username="erin",
+            hashed_password="hash",
+            role="EDITOR",
+            created=datetime.now(),
+            password_hint="Favorite Color",
+        )
+        self.assertTrue(user.verify_password_hint(" favorite color "))
+
+    def test_user_verify_password_hint_false_when_missing(self):
+        """User.verify_password_hint should return False when no hint exists."""
+        user = User(
+            username="faye",
+            hashed_password="hash",
+            role="EDITOR",
+            created=datetime.now(),
+        )
+        self.assertFalse(user.verify_password_hint("anything"))
+
 
 class TestInMemoryUserRepository(unittest.TestCase):
     """InMemoryUserRepository CRUD tests."""
@@ -328,6 +349,19 @@ class TestInMemoryUserRepository(unittest.TestCase):
         user.is_active = False
         result = self.repo.authenticate("grace", "pass")
         self.assertIsNone(result)
+
+    def test_verify_password_hint(self):
+        """verify_password_hint should return True for matching hint."""
+        self.repo.create("henry", "pass12345", "EDITOR", password_hint="river")
+        self.assertTrue(self.repo.verify_password_hint("henry", "river"))
+        self.assertFalse(self.repo.verify_password_hint("henry", "mountain"))
+
+    def test_update_password(self):
+        """update_password should replace old password hash with a new one."""
+        self.repo.create("iris", "oldpass123", "EDITOR")
+        updated = self.repo.update_password("iris", "newpass123")
+        self.assertTrue(updated.verify_password("newpass123"))
+        self.assertFalse(updated.verify_password("oldpass123"))
 
 
 if __name__ == "__main__":

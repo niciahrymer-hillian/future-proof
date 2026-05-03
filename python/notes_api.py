@@ -223,7 +223,8 @@ class NewUserRequest(BaseModel):
 
     username: str = Field(min_length=1)
     password: str = Field(min_length=8)
-    role: str = Role.VIEWER
+    role: str = Role.EDITOR
+    password_hint: Optional[str] = None
 
 
 class UpdateRoleRequest(BaseModel):
@@ -510,7 +511,12 @@ def admin_create_user(
     if data.role not in Role.HIERARCHY:
         raise HTTPException(status_code=400, detail=f"Unknown role: {data.role}")
     try:
-        user = user_repo.create(data.username, data.password, role=data.role)
+        user = user_repo.create(
+            data.username,
+            data.password,
+            role=data.role,
+            password_hint=data.password_hint,
+        )
         audit.record(current_user.username, "USER_CREATED", f"user:{user.username}", {
             "role": user.role
         })
@@ -686,11 +692,12 @@ def register_submit(
     request: Request,
     username: str = Form(...),
     password: str = Form(...),
+    password_hint: str = Form(default=""),
     user_repo: "UserRepository" = Depends(get_user_repo),
 ):
-    """Create a new viewer user and sign them in.
+    """Create a new editor user and sign them in.
 
-    EFFECT: Allows browser users to self-register with the default VIEWER role.
+    EFFECT: Allows browser users to self-register with full note-writing access.
     """
     username = username.strip()
     if not username:
@@ -709,7 +716,12 @@ def register_submit(
         )
 
     try:
-        user = user_repo.create(username, password, role=Role.VIEWER)
+        user = user_repo.create(
+            username,
+            password,
+            role=Role.EDITOR,
+            password_hint=password_hint,
+        )
     except ValueError:
         return templates.TemplateResponse(
             request,
@@ -721,6 +733,73 @@ def register_submit(
     request.session["username"] = user.username
     request.session["role"] = user.role
     return RedirectResponse("/", status_code=303)
+
+
+@app.get("/forgot-password", response_class=HTMLResponse)
+def forgot_password_page(request: Request):
+    """Render the password-reset form with password hint validation."""
+    return templates.TemplateResponse(request, "forgot_password.html")
+
+
+@app.post("/forgot-password", response_class=HTMLResponse)
+def forgot_password_submit(
+    request: Request,
+    username: str = Form(...),
+    password_hint: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...),
+    user_repo: "UserRepository" = Depends(get_user_repo),
+):
+    """Reset password after validating username + password hint.
+
+    WHY: the hint acts as a lightweight second check before accepting
+    a reset from an unauthenticated user.
+    """
+    username = username.strip()
+    if not username:
+        return templates.TemplateResponse(
+            request,
+            "forgot_password.html",
+            {"error": "Username is required."},
+            status_code=400,
+        )
+    if len(new_password) < 8:
+        return templates.TemplateResponse(
+            request,
+            "forgot_password.html",
+            {"error": "New password must be at least 8 characters."},
+            status_code=400,
+        )
+    if new_password != confirm_password:
+        return templates.TemplateResponse(
+            request,
+            "forgot_password.html",
+            {"error": "Passwords do not match."},
+            status_code=400,
+        )
+
+    user = user_repo.get(username)
+    if user is None:
+        return templates.TemplateResponse(
+            request,
+            "forgot_password.html",
+            {"error": "Invalid username or password hint."},
+            status_code=401,
+        )
+    if not user_repo.verify_password_hint(username, password_hint):
+        return templates.TemplateResponse(
+            request,
+            "forgot_password.html",
+            {"error": "Invalid username or password hint."},
+            status_code=401,
+        )
+
+    user_repo.update_password(username, new_password)
+    return templates.TemplateResponse(
+        request,
+        "login.html",
+        {"message": "Password updated. Please sign in with your new password."},
+    )
 
 
 @app.post("/logout")
@@ -775,6 +854,8 @@ def create_note_submit(
     """Handle create-note form submission."""
     if not _session_user(request):
         return RedirectResponse("/login", status_code=303)
+    if not _can_write(_session_role(request)):
+        return RedirectResponse("/", status_code=303)
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
     repo.add(title, content, tags=tag_list)
     return RedirectResponse("/", status_code=303)
@@ -834,6 +915,8 @@ def edit_note_submit(
     """Handle edit-note form submission."""
     if not _session_user(request):
         return RedirectResponse("/login", status_code=303)
+    if not _can_write(_session_role(request)):
+        return RedirectResponse(f"/notes/{note_id}", status_code=303)
     try:
         repo.update(note_id, new_title=title, new_content=content)
     except (FileNotFoundError, PermissionError):
@@ -850,6 +933,8 @@ def delete_note_submit(request: Request, note_id: str, repo: Optional[UserScoped
     """Handle delete form submission. Uses POST because HTML forms only support GET/POST."""
     if not _session_user(request):
         return RedirectResponse("/login", status_code=303)
+    if not _can_write(_session_role(request)):
+        return RedirectResponse(f"/notes/{note_id}", status_code=303)
     try:
         repo.delete(note_id)
     except (FileNotFoundError, PermissionError):

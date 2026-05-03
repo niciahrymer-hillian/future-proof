@@ -1,0 +1,76 @@
+{# [TEMPLATE] register_annotated_cp.html
+   Annotated reference copy of python/templates/register.html
+
+   [WHY THIS PAGE EXISTS]
+   Allows new users to self-register without admin involvement.
+   The server-side handler (register_submit in notes_api.py) creates the account
+   with Role.EDITOR so the user can create, edit, and delete notes immediately
+   after sign-up.
+
+   [ROUTE] GET /register  → render this template
+            POST /register → register_submit() handler
+#}
+
+{# [EXTEND] Pulls nav/styles/scripts from base.html #}
+{% extends "base.html" %}
+
+{# [BLOCK title] Browser tab label #}
+{% block title %}Sign Up - The Handy Dandy Notebook{% endblock %}
+
+{% block content %}
+<div style="max-width:420px;margin:3rem auto;">
+
+  <h1 class="brand-70s" style="margin-bottom:0.2rem;">Join The Handy Dandy Notebook</h1>
+  <p style="color:#8a6b5a;margin-bottom:1rem;font-family:Georgia, 'Times New Roman', serif;font-style:italic;">
+    Create your account and start collecting your ideas.
+  </p>
+
+  {# [NAV PILLS] Active page (Sign up) uses btn-primary; Sign in uses btn-secondary. #}
+  <div style="display:flex;gap:0.5rem;margin-bottom:1rem;">
+    <a href="/login"    class="btn btn-secondary" style="flex:1;justify-content:center;"><i class="fa-solid fa-right-to-bracket"></i> Sign in</a>
+    <a href="/register" class="btn btn-primary"   style="flex:1;justify-content:center;"><i class="fa-solid fa-user-plus"></i> Sign up</a>
+  </div>
+
+  {# [ERROR BLOCK] Server-side validation errors: blank username, short password,
+     duplicate username. #}
+  {% if error %}
+  <div class="error"><i class="fa-solid fa-circle-exclamation"></i> {{ error }}</div>
+  {% endif %}
+
+  <div class="card" style="margin-top:1rem;">
+    {# [FORM] POST to /register — handler: register_submit() in notes_api.py
+       On success: creates account as EDITOR, sets session cookie, redirects to /. #}
+    <form method="post" action="/register">
+
+      {# [FIELD username]
+         autocomplete="username" lets password managers remember the new account name. #}
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" autocomplete="username" autofocus required>
+      </div>
+
+      {# [FIELD password]
+         autocomplete="new-password" tells browsers/password managers to offer a strong
+         generated password rather than filling with an existing saved password. #}
+      <div class="form-group">
+        <label for="password">Password (8+ characters)</label>
+        <input type="password" id="password" name="password" autocomplete="new-password" required>
+      </div>
+
+      {# [FIELD password_hint] Optional. Stored on the user record so the forgot-password
+         flow can verify identity without an email system.
+         [SECURITY] autocomplete="off" prevents browsers from caching or suggesting the
+         hint value to other users on the same device. #}
+      <div class="form-group">
+        <label for="password_hint">Password hint (optional)</label>
+        <input type="text" id="password_hint" name="password_hint" autocomplete="off" placeholder="e.g. favorite childhood pet">
+      </div>
+
+      {# [SUBMIT] Full-width button consistent with the login page. #}
+      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;">
+        <i class="fa-solid fa-user-plus"></i> Create account
+      </button>
+    </form>
+  </div>
+</div>
+{% endblock %}

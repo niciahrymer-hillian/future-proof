@@ -5,7 +5,7 @@
             "name": "Launch Browser",
             "request": "launch",
             "type": "editor-browser",
-            "url": "http://localhost:8080",
+            "url": "http://127.0.0.1:8010/login",
             "webRoot": "${workspaceFolder}"
         },
         {

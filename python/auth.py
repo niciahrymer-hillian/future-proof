@@ -73,6 +73,7 @@ class User:
     role: str = Role.VIEWER
     created: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
     is_active: bool = True
+    password_hint: Optional[str] = None
 
     def verify_password(self, plaintext: str) -> bool:
         """Check if plaintext password matches the stored hash.
@@ -93,6 +94,15 @@ class User:
         user_level = Role.HIERARCHY.get(self.role, -1)
         required_level = Role.HIERARCHY.get(required_role, -1)
         return user_level >= required_level
+
+    def verify_password_hint(self, hint: str) -> bool:
+        """Check if the provided hint matches the stored hint.
+
+        WHY: password recovery should require a second user-known secret.
+        """
+        if self.password_hint is None:
+            return False
+        return self.password_hint.strip().lower() == hint.strip().lower()
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -178,7 +188,13 @@ def verify_access_token(token: str) -> TokenData:
 class UserRepository:
     """Abstract storage for user accounts."""
 
-    def create(self, username: str, plaintext_password: str, role: str = Role.VIEWER) -> User:
+    def create(
+        self,
+        username: str,
+        plaintext_password: str,
+        role: str = Role.VIEWER,
+        password_hint: Optional[str] = None,
+    ) -> User:
         """Create a new user account."""
         raise NotImplementedError
 
@@ -198,6 +214,14 @@ class UserRepository:
         """Update a user's role. Raises KeyError if not found."""
         raise NotImplementedError
 
+    def update_password(self, username: str, new_plaintext_password: str) -> User:
+        """Update a user's password. Raises KeyError if not found."""
+        raise NotImplementedError
+
+    def verify_password_hint(self, username: str, hint: str) -> bool:
+        """Verify a user's password hint. Returns False if user/hint missing."""
+        raise NotImplementedError
+
 
 class InMemoryUserRepository(UserRepository):
     """Stores users in a plain dict — for testing only.
@@ -209,7 +233,13 @@ class InMemoryUserRepository(UserRepository):
     def __init__(self):
         self._users: dict[str, User] = {}
 
-    def create(self, username: str, plaintext_password: str, role: str = Role.VIEWER) -> User:
+    def create(
+        self,
+        username: str,
+        plaintext_password: str,
+        role: str = Role.VIEWER,
+        password_hint: Optional[str] = None,
+    ) -> User:
         username_lower = username.lower().strip()
         if username_lower in self._users:
             raise ValueError(f"User already exists: {username}")
@@ -220,6 +250,7 @@ class InMemoryUserRepository(UserRepository):
             username=username_lower,
             hashed_password=hash_password(plaintext_password),
             role=role,
+            password_hint=(password_hint.strip() if password_hint and password_hint.strip() else None),
         )
         self._users[username_lower] = user
         return user
@@ -259,6 +290,23 @@ class InMemoryUserRepository(UserRepository):
             raise ValueError(f"User not found: {username}")
         user.role = new_role
         return user
+
+    def update_password(self, username: str, new_plaintext_password: str) -> User:
+        """Update a user's password. Raises ValueError if user/password is invalid."""
+        user = self.get(username)
+        if user is None:
+            raise ValueError(f"User not found: {username}")
+        if not new_plaintext_password or not new_plaintext_password.strip():
+            raise ValueError("Password cannot be empty")
+        user.hashed_password = hash_password(new_plaintext_password)
+        return user
+
+    def verify_password_hint(self, username: str, hint: str) -> bool:
+        """Verify a user's password hint. Returns False for unknown users."""
+        user = self.get(username)
+        if user is None:
+            return False
+        return user.verify_password_hint(hint)
 
     def authenticate(self, username: str, plaintext_password: str) -> Optional[User]:
         """Authenticate a user by username and password.

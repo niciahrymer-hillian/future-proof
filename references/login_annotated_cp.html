@@ -1,0 +1,88 @@
+{# [TEMPLATE] login_annotated_cp.html
+   Annotated reference copy of python/templates/login.html
+
+   [WHY THIS PAGE EXISTS]
+   Entry point for returning users. Validates credentials (server side in
+   notes_api.py:login_submit), sets a signed session cookie on success, then
+   redirects to the notes list. Also displays post-reset success messages
+   forwarded from the forgot-password flow.
+
+   [ROUTE] GET /login  → render this template
+            POST /login → login_submit() handler
+#}
+
+{# [EXTEND] Pulls nav/styles/scripts from base.html #}
+{% extends "base.html" %}
+
+{# [BLOCK title] Browser tab label #}
+{% block title %}Sign In - The Handy Dandy Notebook{% endblock %}
+
+{% block content %}
+{# [LAYOUT] Narrow centred column matching register/forgot-password width #}
+<div style="max-width:420px;margin:3rem auto;">
+
+  {# [HEADING] Brand font defined in base.html as .brand-70s #}
+  <h1 class="brand-70s" style="margin-bottom:0.2rem;">The Handy Dandy Notebook</h1>
+  <p style="color:#8a6b5a;margin-bottom:1rem;font-family:Georgia, 'Times New Roman', serif;font-style:italic;">
+    A cozy place for ideas, notes, and reflections.
+  </p>
+
+  {# [NAV PILLS] Sign in / Sign up toggle so users can reach registration easily.
+     Active page highlighted with btn-primary; inactive with btn-secondary. #}
+  <div style="display:flex;gap:0.5rem;margin-bottom:1rem;">
+    <a href="/login"    class="btn btn-primary"   style="flex:1;justify-content:center;"><i class="fa-solid fa-right-to-bracket"></i> Sign in</a>
+    <a href="/register" class="btn btn-secondary" style="flex:1;justify-content:center;"><i class="fa-solid fa-user-plus"></i> Sign up</a>
+  </div>
+
+  {# [ERROR BLOCK] Rendered by login_submit() when credentials are wrong.
+     [SECURITY] Same message for bad username AND bad password to prevent
+     user enumeration — an attacker cannot learn which usernames exist. #}
+  {% if error %}
+  <div class="error"><i class="fa-solid fa-circle-exclamation"></i> {{ error }}</div>
+  {% endif %}
+
+  {# [MESSAGE BLOCK] Success banner forwarded from forgot_password_submit() after
+     a successful password reset. Green colour distinguishes it from errors. #}
+  {% if message %}
+  <div style="background:#ecf9ef;color:#25643a;border-left:4px solid #3a9d57;padding:0.6rem 1rem;border-radius:4px;margin-bottom:1rem;">
+    <i class="fa-solid fa-circle-check"></i> {{ message }}
+  </div>
+  {% endif %}
+
+  {# [CARD] Form wrapped in the standard card box #}
+  <div class="card" style="margin-top:1rem;">
+    {# [FORM] POST to /login — handler: login_submit() in notes_api.py
+       On success: sets session cookie, redirects to / with 303.
+       On failure: re-renders this template with an error message. #}
+    <form method="post" action="/login">
+
+      {# [FIELD username]
+         autocomplete="username" lets password managers fill this field.
+         autofocus moves cursor here immediately on page load. #}
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" autocomplete="username" autofocus required>
+      </div>
+
+      {# [FIELD password]
+         autocomplete="current-password" tells password managers this is the
+         existing password (not a new one), so they offer saved credentials. #}
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" autocomplete="current-password" required>
+      </div>
+
+      {# [FORGOT PASSWORD LINK] Right-aligned below the password field for
+         discoverability without cluttering the main flow. #}
+      <div style="display:flex;justify-content:flex-end;margin-top:-0.4rem;margin-bottom:0.9rem;">
+        <a href="/forgot-password" style="font-size:0.9rem;"><i class="fa-solid fa-key"></i> Forgot password?</a>
+      </div>
+
+      {# [SUBMIT] Full-width button to match the register page layout. #}
+      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;">
+        <i class="fa-solid fa-right-to-bracket"></i> Sign in
+      </button>
+    </form>
+  </div>
+</div>
+{% endblock %}

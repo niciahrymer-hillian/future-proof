@@ -1,0 +1,245 @@
+{# [TEMPLATE] base_annotated_cp.html
+   Annotated reference copy of python/templates/base.html
+
+   [WHY THIS FILE EXISTS]
+   base.html is the single shared layout that every other template extends.
+   It owns the <head>, global CSS variables/classes, the navigation bar, the
+   page container, and the theme-toggle script. Keeping it in one place means
+   every page automatically gets the same styles and nav without duplication.
+
+   [INHERITANCE]
+   Child templates call {% extends "base.html" %} and fill in:
+     {% block title %} — sets the browser tab/title text
+     {% block content %} — fills the <div class="container"> body area
+#}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  {# [META charset] UTF-8 ensures all unicode characters render correctly #}
+  <meta charset="UTF-8">
+  {# [META viewport] Makes the layout responsive on mobile devices #}
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  {# [BLOCK title] Child templates override this to set page-specific tab text.
+     WHY: descriptive tab titles improve usability and accessibility. #}
+  <title>{% block title %}The Handy Dandy Notebook{% endblock %}</title>
+
+  {# [IMPORT fonts] Google Fonts preconnect + display:swap for performance.
+     WHY preconnect: establishes early TCP connection to Google's CDN so the
+     font download starts sooner, reducing layout-shift flicker. #}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Chicle&family=Fascinate&family=Monoton&family=Oi&family=Ranchers&display=swap" rel="stylesheet">
+
+  {# [IMPORT icons] Font Awesome 6 icon library from CDN.
+     WHY CDN: avoids bundling a large icon font into the project itself. #}
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+
+  <style>
+    {# [RESET] box-sizing border-box prevents padding from expanding element widths.
+       Zeroing margin/padding gives a consistent cross-browser starting point. #}
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    {# [CSS CUSTOM PROPERTIES] All colours are defined here as variables so a
+       single edit propagates everywhere. Named for their semantic role, not
+       their hex value, making future theme changes easier. #}
+    :root {
+      --cream-bg: #FFE0BB;        /* page background */
+      --cream-surface: #FFF6E9;   /* card / input background */
+      --accent-coral: #EC906A;    /* nav gradient end + hover */
+      --accent-orange: #F4914E;   /* nav gradient start + primary button */
+      --accent-gold: #DEB158;     /* decorative gold tones */
+      --soft-brown: #7A533D;      /* headings, links, tag text */
+      --dark-brown: #5B3E2C;      /* body text */
+      --muted-brown: #8E6A55;     /* secondary metadata */
+      --border-warm: #E6C79A;     /* card borders */
+      --danger: #C55A3D;          /* error / delete button */
+      --danger-dark: #973E27;     /* danger hover state */
+      --tag-bg: #FFE8C8;          /* tag pill background */
+    }
+
+    {# [BODY] Base background uses layered radial gradients + a subtle diagonal
+       line pattern to give the page a textured 70s-inspired feel. #}
+    body {
+      font-family: Tahoma, Verdana, sans-serif;
+      background-color: var(--cream-bg);
+      background-image:
+        radial-gradient(circle at 20% 15%, rgba(244, 145, 78, 0.18) 0%, rgba(244, 145, 78, 0) 28%),
+        radial-gradient(circle at 85% 5%, rgba(236, 144, 106, 0.18) 0%, rgba(236, 144, 106, 0) 22%),
+        radial-gradient(circle at 70% 85%, rgba(222, 177, 88, 0.16) 0%, rgba(222, 177, 88, 0) 25%),
+        repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.1) 0px, rgba(255, 255, 255, 0.1) 2px, rgba(0, 0, 0, 0) 2px, rgba(0, 0, 0, 0) 7px);
+      color: var(--dark-brown);
+      line-height: 1.6;
+      transition: background-image 0.2s ease, background-color 0.2s ease;
+    }
+
+    {# [THEME VARIANTS] .theme-soft and .theme-bold reduce/increase gradient
+       intensity. Applied by the JS toggle at the bottom of this file.
+       WHY class-based toggling: no page reload needed; state persists in
+       localStorage across sessions. #}
+    body.theme-soft {
+      background-image:
+        radial-gradient(circle at 20% 15%, rgba(244, 145, 78, 0.12) 0%, rgba(244, 145, 78, 0) 30%),
+        radial-gradient(circle at 85% 5%, rgba(236, 144, 106, 0.1) 0%, rgba(236, 144, 106, 0) 24%),
+        radial-gradient(circle at 70% 85%, rgba(222, 177, 88, 0.1) 0%, rgba(222, 177, 88, 0) 28%),
+        repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.07) 0px, rgba(255, 255, 255, 0.07) 2px, rgba(0, 0, 0, 0) 2px, rgba(0, 0, 0, 0) 8px);
+    }
+    body.theme-soft .card { box-shadow: 0 2px 6px rgba(133, 96, 72, 0.09); }
+    body.theme-soft nav  { box-shadow: 0 3px 8px rgba(123, 73, 45, 0.18); }
+
+    body.theme-bold {
+      background-image:
+        radial-gradient(circle at 20% 15%, rgba(244, 145, 78, 0.24) 0%, rgba(244, 145, 78, 0) 26%),
+        radial-gradient(circle at 85% 5%, rgba(236, 144, 106, 0.24) 0%, rgba(236, 144, 106, 0) 20%),
+        radial-gradient(circle at 70% 85%, rgba(222, 177, 88, 0.22) 0%, rgba(222, 177, 88, 0) 22%),
+        repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.13) 0px, rgba(255, 255, 255, 0.13) 2px, rgba(0, 0, 0, 0) 2px, rgba(0, 0, 0, 0) 6px);
+    }
+    body.theme-bold .card { box-shadow: 0 5px 14px rgba(133, 96, 72, 0.16); }
+    body.theme-bold nav  { box-shadow: 0 6px 14px rgba(123, 73, 45, 0.28); }
+
+    {# [CONTAINER] Centres content and caps width at 800px for readability. #}
+    .container { max-width: 800px; margin: 0 auto; padding: 1rem 1.5rem; }
+
+    {# [NAV] Top navigation bar. Uses flexbox so items align on a single row
+       with a .spacer that pushes the username/logout to the far right. #}
+    nav {
+      background: linear-gradient(135deg, var(--accent-orange) 0%, var(--accent-coral) 55%, #CE7A58 100%);
+      color: #fff7ef;
+      padding: 0.75rem 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 1.1rem;
+      box-shadow: 0 4px 10px rgba(123, 73, 45, 0.24);
+    }
+    nav a { color: #fff6e7; text-decoration: none; font-style: italic; display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600; transition: color 0.15s ease, transform 0.15s ease; }
+    nav a:hover { color: #FFE0BB; text-decoration: underline; transform: translateY(-1px); }
+    nav .spacer { flex: 1; } {# [SPACER] Pushes right-side items to the far edge #}
+    nav span { font-size: 0.9rem; opacity: 0.9; }
+
+    {# [HEADINGS] Serif font (Georgia) for a classic editorial feel.
+       colour tied to --soft-brown for warmth. #}
+    h1, h2 { font-family: Georgia, 'Times New Roman', serif; margin: 1.25rem 0 0.75rem; color: var(--soft-brown); }
+    h1 { font-size: 1.6rem; }
+    h2 { font-size: 1.2rem; margin-top: 1rem; margin-bottom: 0.5rem; }
+    a { color: var(--soft-brown); }
+
+    {# [BTN] Shared pill-shaped button base class.
+       WHY pill shape (border-radius:999px): distinctive, tactile feel.
+       Hover lifts the button with translateY + deeper box-shadow for a
+       pressed/raised affordance. #}
+    .btn { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.48rem 1.08rem; border-radius: 999px; border: 2px solid rgba(91, 62, 44, 0.25); cursor: pointer; font-size: 0.95rem; text-decoration: none; font-family: Tahoma, Verdana, sans-serif; font-weight: 700; box-shadow: 0 2px 0 rgba(91, 62, 44, 0.25); transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease; }
+    .btn:hover { transform: translateY(-1px); box-shadow: 0 4px 0 rgba(91, 62, 44, 0.25); }
+    .btn-primary   { background: linear-gradient(180deg, var(--accent-orange), #E97E3B); color: #fffaf4; }
+    .btn-primary:hover { background: linear-gradient(180deg, #E87A35, #D96D2B); }
+    .btn-danger    { background: var(--danger); color: #fff7f4; }
+    .btn-danger:hover  { background: var(--danger-dark); }
+    .btn-secondary { background: linear-gradient(180deg, #F3D8B6, #EBCB9E); color: var(--dark-brown); }
+    .btn-secondary:hover { background: linear-gradient(180deg, #EBCB9E, #DEB98B); }
+
+    {# [CARD] Standard content box with warm surface colour and rounded corners.
+       Used for notes, forms, and search results. #}
+    .card { background: var(--cream-surface); border: 1px solid var(--border-warm); border-radius: 12px; box-shadow: 0 2px 8px rgba(133, 96, 72, 0.12); padding: 1rem 1.25rem; margin-bottom: 0.85rem; }
+    .card-title { font-weight: 600; font-size: 1.05rem; }
+    .card-meta   { font-size: 0.82rem; color: var(--muted-brown); margin-top: 0.2rem; }
+
+    {# [TAG] Inline label pill shown on note cards and detail views. #}
+    .tag { display: inline-block; background: var(--tag-bg); color: var(--soft-brown); border: 1px solid #E5BE7D; border-radius: 3px; padding: 0.1rem 0.45rem; font-size: 0.8rem; margin-right: 0.3rem; }
+
+    {# [FORM ELEMENTS] Unified input/textarea style across all form pages. #}
+    .form-group { margin-bottom: 1rem; }
+    label { display: block; font-weight: 600; margin-bottom: 0.3rem; font-size: 0.92rem; }
+    input[type=text], input[type=password], textarea { width: 100%; padding: 0.5rem 0.65rem; border: 1px solid #d7c5b1; border-radius: 4px; font-size: 0.95rem; font-family: Tahoma, Verdana, sans-serif; background: #fffefb; color: var(--dark-brown); }
+    input[type=text]:focus, input[type=password]:focus, textarea:focus { outline: 2px solid #edb376; border-color: transparent; }
+    textarea { min-height: 160px; resize: vertical; }
+
+    {# [ERROR] Alert banner for server-side validation errors.
+       Left red border makes it scannable without needing to read the text first. #}
+    .error { background: #FFF0E7; color: var(--danger-dark); border-left: 4px solid var(--danger); padding: 0.6rem 1rem; border-radius: 4px; margin-bottom: 1rem; }
+
+    {# [ACTIONS] Flex row for groups of buttons at the bottom of forms/views. #}
+    .actions { display: flex; gap: 0.6rem; margin-top: 1rem; flex-wrap: wrap; align-items: center; }
+    .preview    { color: #6d5548; font-size: 0.9rem; margin-top: 0.3rem; white-space: pre-wrap; }
+    .empty-hint { color: #8a6b5a; font-style: italic; margin-top: 2rem; text-align: center; }
+
+    {# [BRAND-70S] Display font class for page headings. Falls back through
+       multiple decorative web fonts loaded from Google Fonts above. #}
+    .brand-70s { font-family: 'Fascinate', 'Chicle', 'Ranchers', 'Monoton', 'Oi', cursive; letter-spacing: 0.04em; color: var(--soft-brown); text-shadow: 2px 2px 0 #FFD7A8; }
+
+    {# [THEME-TOGGLE] Fixed floating button — always visible regardless of scroll.
+       z-index:50 keeps it above cards/content. #}
+    .theme-toggle { position: fixed; right: 1rem; bottom: 1rem; z-index: 50; border-radius: 999px; border: 2px solid rgba(91, 62, 44, 0.3); background: linear-gradient(180deg, #F8DFC0, #EFC99D); color: var(--dark-brown); padding: 0.5rem 0.9rem; font-family: Tahoma, Verdana, sans-serif; font-size: 0.86rem; font-weight: 700; cursor: pointer; box-shadow: 0 2px 0 rgba(91, 62, 44, 0.25); }
+    .theme-toggle:hover { background: linear-gradient(180deg, #F4D4AD, #E8BB8A); transform: translateY(-1px); box-shadow: 0 4px 0 rgba(91, 62, 44, 0.25); }
+    @media (max-width: 640px) {
+      .theme-toggle { right: 0.7rem; bottom: 0.7rem; padding: 0.45rem 0.75rem; }
+    }
+  </style>
+</head>
+<body>
+
+{# [NAV GUARD] Navigation is only shown when a session exists.
+   WHY: login/register pages must not show the nav (no session yet). #}
+{% if request.session.get("username") %}
+<nav>
+  {# [NAV LINKS] Home, New note, Search — the three core navigation actions. #}
+  <a href="/"><i class="fa-solid fa-book-open"></i> <span class="menu-item-italic">The Handy Dandy Notebook</span></a>
+  <a href="/notes/new"><i class="fa-solid fa-plus"></i> <span class="menu-item-italic">New</span></a>
+  <a href="/search"><i class="fa-solid fa-magnifying-glass"></i> <span class="menu-item-italic">Search</span></a>
+  <span class="spacer"></span>
+  {# [SESSION DISPLAY] Shows username and role so the user can confirm their identity.
+     Role visible here helps debug permission issues during development. #}
+  <span>{{ request.session.get("username") }} ({{ request.session.get("role") }})</span>
+  {# [LOGOUT] Inline form using POST — avoids the logout action being triggered
+     by a GET request (e.g. browser prefetch, link preview). #}
+  <form method="post" action="/logout" style="display:inline">
+    <button type="submit" style="background:none;border:none;color:#ffe6c7;cursor:pointer;font-size:0.9rem;font-style:italic;">
+      <i class="fa-solid fa-right-from-bracket"></i> Logout
+    </button>
+  </form>
+</nav>
+{% endif %}
+
+{# [CONTAINER] All page-specific content is rendered inside this centred wrapper. #}
+<div class="container">
+{% block content %}{% endblock %}
+</div>
+
+{# [THEME TOGGLE BUTTON] Fixed position; JS below handles click behaviour. #}
+<button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme intensity">
+  <i class="fa-solid fa-circle-half-stroke"></i> Intensity: Bold
+</button>
+
+<script>
+  {# [SCRIPT theme-toggle] Persists the user's preferred intensity in localStorage.
+     WHY IIFE: wraps in a closure to avoid polluting the global scope.
+     WHY localStorage: survives page navigation and browser restart without
+     a server round-trip. #}
+  (function () {
+    const storageKey = "handy-dandy-theme-intensity";
+    const toggle = document.getElementById("theme-toggle");
+    const body = document.body;
+    if (!toggle || !body) return;
+
+    const validModes = ["soft", "bold"];
+    const saved = localStorage.getItem(storageKey);
+    {# [INIT] Fall back to "bold" if no saved preference or value is corrupt. #}
+    const initial = validModes.includes(saved) ? saved : "bold";
+
+    function apply(mode) {
+      body.classList.remove("theme-soft", "theme-bold");
+      body.classList.add("theme-" + mode);
+      toggle.innerHTML = '<i class="fa-solid fa-circle-half-stroke"></i> Intensity: ' + (mode === "soft" ? "Soft" : "Bold");
+      localStorage.setItem(storageKey, mode);
+    }
+
+    {# [CLICK] Toggles between soft ↔ bold on every click. #}
+    toggle.addEventListener("click", function () {
+      const next = body.classList.contains("theme-soft") ? "bold" : "soft";
+      apply(next);
+    });
+
+    apply(initial);
+  })();
+</script>
+
+</body>
+</html>

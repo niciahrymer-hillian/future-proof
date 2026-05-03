@@ -1,0 +1,185 @@
+{# [TEMPLATE] notes_list_annotated_cp.html
+   Annotated reference copy of python/templates/notes_list.html
+
+   [WHY THIS PAGE EXISTS]
+   Home page for authenticated users. Lists all notes for the logged-in user,
+   shows a "New note" button when can_write is True (EDITOR/ADMIN only), and
+   supports client-side drag-and-drop reordering persisted in localStorage.
+
+   [CONTEXT VARIABLES] passed from notes_api.py:home()
+     notes     — list of note summary dicts from UserScopedNoteRepository.list_all()
+     can_write — bool: True when role is EDITOR or ADMIN
+
+   [ROUTE] GET / → home() handler
+#}
+
+{# [EXTEND] base.html provides nav, styles, and theme toggle #}
+{% extends "base.html" %}
+
+{# [BLOCK title] Browser tab label #}
+{% block title %}My Notes{% endblock %}
+
+{% block content %}
+
+{# [STYLE] Page-scoped CSS for the draggable note card list.
+   WHY scoped here rather than in base.html: these classes are only used on this page. #}
+<style>
+  .notes-grid { display: grid; gap: 0.75rem; }
+
+  {# [NOTE-CARD] cursor:grab signals to users that cards are draggable.
+     transition: smooth visual feedback on hover and drag. #}
+  .note-card {
+    cursor: grab;
+    transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+  }
+  .note-card:hover { transform: translateY(-1px); box-shadow: 0 6px 14px rgba(138, 90, 68, 0.16); }
+
+  {# [DRAGGING STATE] opacity:0.45 leaves a faint ghost in the original slot
+     so users can see where the card came from during a drag. #}
+  .note-card.dragging { opacity: 0.45; cursor: grabbing; }
+
+  .note-card-header { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; }
+
+  {# [DRAG HANDLE] Visual indicator (grip icon) that the card is draggable.
+     user-select:none prevents accidental text selection while dragging. #}
+  .drag-handle { color: #8a5a44; font-size: 0.95rem; display: inline-flex; align-items: center; gap: 0.35rem; user-select: none; }
+
+  .timestamp { font-size: 0.82rem; color: #9a7b6b; margin-top: 0.35rem; display: flex; align-items: center; gap: 0.35rem; }
+</style>
+
+{# [HEADER ROW] Title on the left, "New note" button on the right.
+   [WHY can_write guard] VIEWER role users should see their notes but not
+   the create button — the server also blocks the POST, but hiding the button
+   avoids confusing UX. #}
+<div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:.5rem;">
+  <h1>My Notes</h1>
+  {% if can_write %}
+  <a href="/notes/new" class="btn btn-primary"><i class="fa-solid fa-plus"></i> New note</a>
+  {% endif %}
+</div>
+
+{% if notes %}
+<p class="card-meta" style="margin-bottom:.5rem;">Drag and drop cards to reorder your notes list.</p>
+
+{# [NOTES LIST] id="notes-list" is the drag-drop root targeted by the JS below.
+   data-note-id on each card is used by the JS to persist order in localStorage. #}
+<div id="notes-list" class="notes-grid">
+{% for note in notes %}
+<article class="card note-card" draggable="true" data-note-id="{{ note.id }}">
+  <div class="note-card-header">
+    {# [CARD TITLE] Links to the note detail page #}
+    <div class="card-title"><a href="/notes/{{ note.id }}">{{ note.title }}</a></div>
+    <span class="drag-handle" title="Drag to reorder"><i class="fa-solid fa-grip-vertical"></i></span>
+  </div>
+  {# [TAGS] Loop renders each tag as a pill badge #}
+  <div class="card-meta" style="margin-top:0.35rem;">
+    {% for tag in note.tags %}<span class="tag">{{ tag }}</span>{% endfor %}
+  </div>
+  {# [TIMESTAMP] Strips the T separator from ISO 8601 for human readability #}
+  <div class="timestamp"><i class="fa-regular fa-clock"></i> {{ note.modified[:19].replace('T', ' ') }}</div>
+  {# [PREVIEW] Shows a short content excerpt; falls back to placeholder text. #}
+  {% if note.preview %}
+  <div class="preview">{{ note.preview[:120] }}{% if note.preview|length > 120 %}…{% endif %}</div>
+  {% else %}
+  <div class="preview"><em>No preview text yet.</em></div>
+  {% endif %}
+</article>
+{% endfor %}
+</div>
+
+<script>
+  (function () {
+    const list = document.getElementById("notes-list");
+    if (!list) return;
+
+    {# [STORAGE KEY] Namespaced per user so multiple accounts on the same browser
+       don't share reordering state. #}
+    const storageKey = "notes-order:{{ request.session.get('username') }}";
+
+    function cards() {
+      return Array.from(list.querySelectorAll(".note-card"));
+    }
+
+    {# [SAVE ORDER] Writes the current DOM order of note IDs to localStorage
+       after every drop. #}
+    function saveOrder() {
+      const order = cards().map((card) => card.dataset.noteId);
+      localStorage.setItem(storageKey, JSON.stringify(order));
+    }
+
+    {# [RESTORE ORDER] On page load, re-appends cards in the saved order.
+       Cards not in the saved list keep their server-rendered position.
+       WHY try/catch: corrupted JSON in localStorage must not break the page. #}
+    function restoreOrder() {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) return;
+      let preferred;
+      try {
+        preferred = JSON.parse(raw);
+      } catch (err) {
+        return;
+      }
+      const map = new Map(cards().map((card) => [card.dataset.noteId, card]));
+      preferred.forEach((id) => {
+        const card = map.get(id);
+        if (card) list.appendChild(card);
+      });
+    }
+
+    {# [AFTER ELEMENT] Binary-search-style: finds the card whose midpoint is
+       just below the current drag Y position, so the dragged card inserts
+       at the correct slot. #}
+    function afterElement(container, y) {
+      const draggableCards = cards().filter((el) => !el.classList.contains("dragging"));
+      return draggableCards.reduce(
+        (closest, child) => {
+          const rect = child.getBoundingClientRect();
+          const offset = y - rect.top - rect.height / 2;
+          if (offset < 0 && offset > closest.offset) {
+            return { offset, element: child };
+          }
+          return closest;
+        },
+        { offset: Number.NEGATIVE_INFINITY, element: null }
+      ).element;
+    }
+
+    {# [DRAG EVENTS]
+       dragstart — marks the dragged card with .dragging class for visual fade
+       dragend   — removes .dragging and persists the new order
+       dragover  — moves the dragged card in the DOM as the user hovers #}
+    list.addEventListener("dragstart", (event) => {
+      const card = event.target.closest(".note-card");
+      if (!card) return;
+      card.classList.add("dragging");
+      event.dataTransfer.effectAllowed = "move";
+    });
+
+    list.addEventListener("dragend", (event) => {
+      const card = event.target.closest(".note-card");
+      if (!card) return;
+      card.classList.remove("dragging");
+      saveOrder();
+    });
+
+    list.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      const dragging = list.querySelector(".note-card.dragging");
+      if (!dragging) return;
+      const next = afterElement(list, event.clientY);
+      if (!next) {
+        list.appendChild(dragging);
+      } else {
+        list.insertBefore(dragging, next);
+      }
+    });
+
+    restoreOrder();
+  })();
+</script>
+
+{% else %}
+{# [EMPTY STATE] Friendly prompt shown when the user has no notes yet. #}
+<p class="empty-hint">No notes yet. <a href="/notes/new">Create your first note.</a></p>
+{% endif %}
+{% endblock %}

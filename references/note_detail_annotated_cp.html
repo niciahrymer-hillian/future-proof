@@ -1,0 +1,62 @@
+{# [TEMPLATE] note_detail_annotated_cp.html
+   Annotated reference copy of python/templates/note_detail.html
+
+   [WHY THIS PAGE EXISTS]
+   Shows the full content of a single note. Edit and Delete actions are
+   conditionally shown based on can_write — VIEWER users can read but not modify.
+
+   [CONTEXT VARIABLES] from notes_api.py:note_detail()
+     note      — Note object with .id, .title, .content, .tags, .created, .modified
+     can_write — bool: True for EDITOR/ADMIN roles
+
+   [ROUTE] GET /notes/{note_id} → note_detail()
+#}
+
+{# [EXTEND] base.html provides nav, styles, and theme toggle #}
+{% extends "base.html" %}
+
+{# [BLOCK title] Uses the note's title as the browser tab text #}
+{% block title %}{{ note.title }}{% endblock %}
+
+{% block content %}
+
+{# [HEADER ROW] Note title left, Edit button right (only for writers). #}
+<div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:.5rem;">
+  <h1>{{ note.title }}</h1>
+  {# [EDIT LINK] Hidden from VIEWER users — they can read but not edit. #}
+  {% if can_write %}
+  <a href="/notes/{{ note.id }}/edit" class="btn btn-secondary">Edit</a>
+  {% endif %}
+</div>
+
+{# [META] Created/modified dates and tag pills.
+   [:10] slices ISO 8601 datetime to just the date portion (YYYY-MM-DD). #}
+<div class="card-meta" style="margin:.25rem 0 .75rem;">
+  Created {{ note.created[:10] }} &middot; Modified {{ note.modified[:10] }}
+  {% for tag in note.tags %}<span class="tag">{{ tag }}</span>{% endfor %}
+</div>
+
+{# [CONTENT] Rendered in a <pre> so newlines and spacing are preserved.
+   white-space:pre-wrap wraps long lines instead of scrolling horizontally.
+   font-family:inherit keeps the body font rather than defaulting to monospace. #}
+<div class="card">
+  <pre style="white-space:pre-wrap;font-family:inherit;font-size:.95rem;">{{ note.content }}</pre>
+</div>
+
+{# [ACTIONS] Writer gets Delete + Back; VIEWER only gets Back. #}
+{% if can_write %}
+<div class="actions" style="margin-top:1rem;">
+  {# [DELETE FORM] POST because HTML forms can't send DELETE.
+     onsubmit confirmation prevents accidental deletions. #}
+  <form method="post" action="/notes/{{ note.id }}/delete" onsubmit="return confirm('Delete this note?')">
+    <button type="submit" class="btn btn-danger">Delete note</button>
+  </form>
+  <a href="/" class="btn btn-secondary">Back to list</a>
+</div>
+{% else %}
+<div class="actions" style="margin-top:1rem;">
+  <a href="/" class="btn btn-secondary">Back to list</a>
+</div>
+{% endif %}
+
+{% endblock %}
