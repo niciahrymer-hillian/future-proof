@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: future-proof-notes
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn notes_api:app --app-dir python --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: AUTH_SECRET_KEY
+        generateValue: true
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: NOTES_HOME
+        value: /var/data/notes
+    disk:
+      name: notes-data
+      mountPath: /var/data
+      sizeGB: 1

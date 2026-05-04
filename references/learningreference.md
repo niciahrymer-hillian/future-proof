@@ -740,4 +740,66 @@ This final note captures the exact state intended for commit.
 
 Commit intent: preserve this configuration as the baseline launchable, themed HTML experience.
 
+---
+
+## Option F - Shareable HTML Link That Stays Up (Render Deployment) (2026-05-04)
+
+**Goal:**
+- Make the FastAPI + Jinja app publicly reachable with a stable URL.
+- Keep note data alive across app restarts.
+
+**What was added:**
+- `requirements.txt`
+  - Captures runtime dependencies needed by Render build and startup:
+    - `fastapi`
+    - `uvicorn[standard]`
+    - `jinja2`
+    - `python-jose[cryptography]`
+    - `bcrypt`
+    - `PyYAML`
+    - `python-multipart`
+
+- `render.yaml`
+  - Defines one Render web service with:
+    - Build command: `pip install -r requirements.txt`
+    - Start command: `uvicorn notes_api:app --app-dir python --host 0.0.0.0 --port $PORT`
+    - Health check path: `/health`
+    - Generated secrets: `AUTH_SECRET_KEY`, `SESSION_SECRET`
+    - Persistent disk mounted at `/var/data`
+    - `NOTES_HOME=/var/data/notes` so notes survive restarts/redeploys
+
+- `.env.example`
+  - Documents required local/prod environment variables.
+  - Keeps secret values out of source control while showing expected names.
+
+**Why these choices:**
+- Render gives a shareable URL with managed HTTPS and process hosting.
+- `--app-dir python` is required because `notes_api.py` lives under `python/`.
+- Persistent disk is required because default container filesystems are ephemeral.
+  - Without a disk mount, created notes would disappear on restart.
+- Health check endpoint (`/health`) gives Render a reliable readiness signal.
+
+**How this was done (step-by-step):**
+1. Scanned imports across `python/*.py` and `python/Tests/*.py` to compile dependency list.
+2. Created `requirements.txt` for deterministic install during deploy.
+3. Created `render.yaml` with build/start commands, env vars, health check, and disk mount.
+4. Created `.env.example` so local setup mirrors hosted settings.
+
+**Deploy steps for a persistent shareable URL:**
+1. Push repository to GitHub.
+2. In Render, create a new Blueprint/Web Service from this repo.
+3. Confirm service settings from `render.yaml` are detected.
+4. Deploy and wait for health check to pass.
+5. Share the generated Render URL.
+
+**Operational note:**
+- Free plans may sleep after inactivity. For a link that stays up continuously, use an always-on paid plan.
+
+**What it affects:**
+- `requirements.txt`
+- `render.yaml`
+- `.env.example`
+- Runtime data path through `NOTES_HOME`
+
+
 

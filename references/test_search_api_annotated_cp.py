@@ -48,7 +48,7 @@ from pathlib import Path
 
 # [VARIABLE] PROJECT_PYTHON_DIR — ensures imports resolve to the project's
 # python/ directory regardless of where pytest is invoked from.
-PROJECT_PYTHON_DIR = Path(__file__).resolve().parents[1]
+PROJECT_PYTHON_DIR = Path(__file__).resolve().parents[1] / "python"
 if str(PROJECT_PYTHON_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_PYTHON_DIR))
 
